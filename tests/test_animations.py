@@ -14,7 +14,7 @@ from hyprland_state import (
 
 class TestAnimationTree:
     def test_global_is_root(self):
-        assert ANIM_FLAT[0] == ("global", None, 0, [])
+        assert ANIM_FLAT[0] == ("global", None, 0, ())
 
     def test_top_level_animations_have_depth_1(self):
         top_names = {
@@ -54,7 +54,7 @@ class TestGetStylesFor:
         assert styles == get_styles_for("windows")
 
     def test_border_has_no_styles(self):
-        assert get_styles_for("border") == []
+        assert get_styles_for("border") == ()
 
     def test_borderangle_has_own_styles(self):
         styles = get_styles_for("borderangle")
@@ -162,3 +162,90 @@ class TestAnimations:
         assert anims.get_parent("windowsIn") == "windows"
         assert "windowsIn" in anims.get_children("windows")
         assert "slide" in anims.get_styles("windows")
+
+
+class TestGetFallback:
+    def test_fallback_from_bare_keyword(self, mock_state, tmp_path):
+        """get_fallback finds animation lines outside managed config."""
+        managed = tmp_path / "gui.conf"
+        managed.write_text("animation = windows, 1, 5, default\n")
+
+        user = tmp_path / "user.conf"
+        user.write_text("animation = windows, 1, 3, myBezier\n")
+
+        main = tmp_path / "main.conf"
+        main.write_text(f"source = {user}\nsource = {managed}\n")
+
+        from hyprland_config import load
+
+        doc = load(main)
+        mock_state.document = doc
+
+        anims = Animations(mock_state)
+        fb = anims.get_fallback("windows", managed)
+        assert fb is not None
+        assert fb.speed == 3.0
+        assert fb.curve == "myBezier"
+
+    def test_fallback_from_section_keyword(self, mock_state, tmp_path):
+        """get_fallback finds animation inside animations { } section."""
+        managed = tmp_path / "gui.conf"
+        managed.write_text("animation = windows, 1, 5, default\n")
+
+        user = tmp_path / "user.conf"
+        user.write_text("animations {\n    animation = windows, 1, 3, ease\n}\n")
+
+        main = tmp_path / "main.conf"
+        main.write_text(f"source = {user}\nsource = {managed}\n")
+
+        from hyprland_config import load
+
+        doc = load(main)
+        mock_state.document = doc
+
+        anims = Animations(mock_state)
+        fb = anims.get_fallback("windows", managed)
+        assert fb is not None
+        assert fb.speed == 3.0
+        assert fb.curve == "ease"
+
+    def test_fallback_returns_none_when_no_user_override(self, mock_state, tmp_path):
+        """get_fallback returns None when only managed config has the animation."""
+        managed = tmp_path / "gui.conf"
+        managed.write_text("animation = windows, 1, 5, default\n")
+
+        main = tmp_path / "main.conf"
+        main.write_text(f"source = {managed}\n")
+
+        from hyprland_config import load
+
+        doc = load(main)
+        mock_state.document = doc
+
+        anims = Animations(mock_state)
+        assert anims.get_fallback("windows", managed) is None
+
+    def test_fallback_last_match_wins(self, mock_state, tmp_path):
+        """When multiple user configs set the same animation, last wins."""
+        managed = tmp_path / "gui.conf"
+        managed.write_text("animation = fade, 1, 8, default\n")
+
+        user1 = tmp_path / "a.conf"
+        user1.write_text("animation = fade, 1, 3, linear\n")
+
+        user2 = tmp_path / "b.conf"
+        user2.write_text("animation = fade, 1, 7, ease\n")
+
+        main = tmp_path / "main.conf"
+        main.write_text(f"source = {user1}\nsource = {user2}\nsource = {managed}\n")
+
+        from hyprland_config import load
+
+        doc = load(main)
+        mock_state.document = doc
+
+        anims = Animations(mock_state)
+        fb = anims.get_fallback("fade", managed)
+        assert fb is not None
+        assert fb.speed == 7.0
+        assert fb.curve == "ease"

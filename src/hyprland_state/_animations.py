@@ -1,6 +1,7 @@
 """Animation tree, state, and IPC interface."""
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, Self
 
 import hyprland_socket
@@ -16,80 +17,84 @@ if TYPE_CHECKING:
 # Children inherit parent values when not explicitly overridden.
 # ---------------------------------------------------------------------------
 
-ANIMATION_TREE = [
+ANIMATION_TREE = (
     (
         "windows",
-        ["slide", "popin", "gnomed"],
-        [
-            ("windowsIn", [], []),
-            ("windowsOut", [], []),
-            ("windowsMove", [], []),
-        ],
+        ("slide", "popin", "gnomed"),
+        (
+            ("windowsIn", (), ()),
+            ("windowsOut", (), ()),
+            ("windowsMove", (), ()),
+        ),
     ),
     (
         "layers",
-        ["slide", "popin", "fade"],
-        [
-            ("layersIn", [], []),
-            ("layersOut", [], []),
-        ],
+        ("slide", "popin", "fade"),
+        (
+            ("layersIn", (), ()),
+            ("layersOut", (), ()),
+        ),
     ),
     (
         "fade",
-        [],
-        [
-            ("fadeIn", [], []),
-            ("fadeOut", [], []),
-            ("fadeSwitch", [], []),
-            ("fadeShadow", [], []),
-            ("fadeDim", [], []),
+        (),
+        (
+            ("fadeIn", (), ()),
+            ("fadeOut", (), ()),
+            ("fadeSwitch", (), ()),
+            ("fadeShadow", (), ()),
+            ("fadeDim", (), ()),
             (
                 "fadeLayers",
-                [],
-                [
-                    ("fadeLayersIn", [], []),
-                    ("fadeLayersOut", [], []),
-                ],
+                (),
+                (
+                    ("fadeLayersIn", (), ()),
+                    ("fadeLayersOut", (), ()),
+                ),
             ),
             (
                 "fadePopups",
-                [],
-                [
-                    ("fadePopupsIn", [], []),
-                    ("fadePopupsOut", [], []),
-                ],
+                (),
+                (
+                    ("fadePopupsIn", (), ()),
+                    ("fadePopupsOut", (), ()),
+                ),
             ),
-            ("fadeDpms", [], []),
-        ],
+            ("fadeDpms", (), ()),
+        ),
     ),
-    ("border", [], []),
-    ("borderangle", ["once", "loop"], []),
+    ("border", (), ()),
+    ("borderangle", ("once", "loop"), ()),
     (
         "workspaces",
-        ["slide", "slidevert", "fade", "slidefade", "slidefadevert"],
-        [
-            ("workspacesIn", [], []),
-            ("workspacesOut", [], []),
+        ("slide", "slidevert", "fade", "slidefade", "slidefadevert"),
+        (
+            ("workspacesIn", (), ()),
+            ("workspacesOut", (), ()),
             (
                 "specialWorkspace",
-                [],
-                [
-                    ("specialWorkspaceIn", [], []),
-                    ("specialWorkspaceOut", [], []),
-                ],
+                (),
+                (
+                    ("specialWorkspaceIn", (), ()),
+                    ("specialWorkspaceOut", (), ()),
+                ),
             ),
-        ],
+        ),
     ),
-    ("zoomFactor", [], []),
-    ("monitorAdded", [], []),
-]
+    ("zoomFactor", (), ()),
+    ("monitorAdded", (), ()),
+)
+
+
+_TreeNode = tuple[str, tuple[str, ...], tuple["_TreeNode", ...]]
+_FlatEntry = tuple[str, str | None, int, tuple[str, ...]]
 
 
 def _flatten_tree(
-    tree: list[tuple[str, list[str], list]], parent: str | None = None, depth: int = 0
-) -> list[tuple[str, str | None, int, list[str]]]:
+    tree: tuple[_TreeNode, ...], parent: str | None = None, depth: int = 0
+) -> list[_FlatEntry]:
     """Flatten the animation tree into an ordered list of (name, parent, depth, styles)."""
-    result: list[tuple[str, str | None, int, list[str]]] = []
+    result: list[_FlatEntry] = []
     for name, styles, children in tree:
         result.append((name, parent, depth, styles))
         result.extend(_flatten_tree(children, parent=name, depth=depth + 1))
@@ -97,18 +102,18 @@ def _flatten_tree(
 
 
 # Flat list: [(name, parent_name, depth, own_styles)]
-ANIM_FLAT: list[tuple[str, str | None, int, list[str]]] = [("global", None, 0, [])] + _flatten_tree(
+ANIM_FLAT: list[_FlatEntry] = [("global", None, 0, ())] + _flatten_tree(
     ANIMATION_TREE, parent="global", depth=1
 )
 
 # Lookup: name -> (parent, depth, styles)
-ANIM_LOOKUP: dict[str, tuple[str | None, int, list[str]]] = {
+ANIM_LOOKUP: dict[str, tuple[str | None, int, tuple[str, ...]]] = {
     name: (parent, depth, styles) for name, parent, depth, styles in ANIM_FLAT
 }
 
 
 # Children lookup: parent_name -> [child_names]
-def _build_children(flat: list[tuple[str, str | None, int, list[str]]]) -> dict[str, list[str]]:
+def _build_children(flat: list[_FlatEntry]) -> dict[str, list[str]]:
     children: dict[str, list[str]] = {}
     for name, parent, _, _ in flat:
         if parent is not None:
@@ -119,7 +124,7 @@ def _build_children(flat: list[tuple[str, str | None, int, list[str]]]) -> dict[
 ANIM_CHILDREN: dict[str, list[str]] = _build_children(ANIM_FLAT)
 
 
-def get_styles_for(name: str) -> list[str]:
+def get_styles_for(name: str) -> tuple[str, ...]:
     """Get available styles for an animation (inheriting from parent chain)."""
     parent, _, styles = ANIM_LOOKUP[name]
     if styles:
@@ -129,7 +134,7 @@ def get_styles_for(name: str) -> list[str]:
         if pstyles:
             return pstyles
         parent = ANIM_LOOKUP[parent][0]
-    return []
+    return ()
 
 
 # ---------------------------------------------------------------------------
@@ -164,6 +169,25 @@ class AnimState:
 # ---------------------------------------------------------------------------
 # Animations interface
 # ---------------------------------------------------------------------------
+
+
+def _parse_animation_value(name: str, parts: list[str]) -> AnimState:
+    """Parse animation keyword parts into an AnimState.
+
+    Expected format: ``[name, onoff, speed, curve, style?]``.
+    """
+    enabled = parts[1] != "0" if len(parts) > 1 else True
+    speed = float(parts[2]) if len(parts) > 2 else 0.0
+    curve = parts[3] if len(parts) > 3 else "default"
+    style = parts[4] if len(parts) > 4 else ""
+    return AnimState(
+        name=name,
+        overridden=True,
+        enabled=enabled,
+        speed=speed,
+        curve=curve,
+        style=style,
+    )
 
 
 def _format_animation_kw(name: str, enabled: bool, speed: float, curve: str, style: str) -> str:
@@ -452,7 +476,7 @@ class Animations:
 
     # -- Inspect --
 
-    def get_styles(self, name: str) -> list[str]:
+    def get_styles(self, name: str) -> tuple[str, ...]:
         """Return available styles for an animation (with inheritance)."""
         return get_styles_for(name)
 
@@ -483,8 +507,26 @@ class Animations:
         # Global defaults
         return True, 8.0, "default", ""
 
+    def get_fallback(self, name: str, managed_path: str | Path) -> AnimState | None:
+        """Resolve what an animation would be without our managed config.
+
+        Reads the config document tree excluding *managed_path* and finds
+        the last ``animation`` keyword line for *name*. Returns an
+        ``AnimState`` parsed from that line, or ``None`` if no fallback
+        exists (the animation would be inherited).
+        """
+        doc = self._state.document
+        excluded = frozenset({Path(managed_path).resolve()})
+        lines = doc.find_all("animation", exclude_sources=excluded)
+        # Last match for this animation name wins (Hyprland semantics)
+        for kw in reversed(lines):
+            parts = [p.strip() for p in kw.value.split(",")]
+            if parts and parts[0] == name:
+                return _parse_animation_value(name, parts)
+        return None
+
     @property
-    def tree(self) -> list[tuple[str, str | None, int, list[str]]]:
+    def tree(self) -> list[_FlatEntry]:
         """Return the flat animation tree: ``[(name, parent, depth, styles), ...]``."""
         return ANIM_FLAT
 

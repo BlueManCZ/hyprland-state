@@ -1,7 +1,6 @@
 """HyprlandState — unified interface to Hyprland's live configuration."""
 
 from collections.abc import Callable, Mapping
-from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -15,14 +14,7 @@ from hyprland_state._animations import Animations
 from hyprland_state._monitors import Monitors
 from hyprland_state._options import OptionInfo
 
-
-class _Unset(Enum):
-    """Sentinel for distinguishing 'not passed' from ``None``."""
-
-    UNSET = "UNSET"
-
-
-_UNSET = _Unset.UNSET
+_UNSET = object()
 
 # Type exemplar values for IPC extraction — tells extract_ipc_value which
 # typed field to read.  e.g. 0 means "extract as int", 0.0 means "as float".
@@ -53,7 +45,7 @@ class HyprlandState:
         self,
         path: str | Path | None = None,
         *,
-        schema: Mapping[str, Any] | None | _Unset = _UNSET,
+        schema: Mapping[str, Any] | None = _UNSET,  # type: ignore[assignment]
         offline: bool | None = None,
     ) -> None:
         """Initialise.
@@ -79,7 +71,7 @@ class HyprlandState:
             self._online = self._version is not None
 
         # Load schema — match the running compositor version when possible
-        if isinstance(schema, _Unset):
+        if schema is _UNSET:
             schema = _load_schema(self._version)
         self._schema = schema
 
@@ -140,7 +132,7 @@ class HyprlandState:
     def get(self, key: str, hint: Any = None) -> Any:
         """Read the effective live value of a config option.
 
-        Resolution: IPC (if online) → config file → hint.
+        Resolution: IPC (if online) → hint, or config file → hint (offline).
         Type is determined by: explicit hint > schema type > best-guess.
         """
         hint = self._resolve_hint(key, hint)
@@ -169,7 +161,7 @@ class HyprlandState:
         data = self.get_raw(key)
         if data is None:
             return hint, False
-        return extract_ipc_value(data, hint), True
+        return self._extract_value(key, data, hint), True
 
     def get_disk(self, key: str) -> str | None:
         """Read the value from the config file on disk."""
@@ -442,6 +434,13 @@ class HyprlandState:
         except hyprland_socket.HyprlandError:
             return default
 
+    def _option_type(self, key: str) -> str | None:
+        """Return the schema type string for *key*, or ``None`` if unknown."""
+        if self._schema is None:
+            return None
+        opt = self._schema.get(key)
+        return getattr(opt, "type", None) if opt is not None else None
+
     def _resolve_hint(self, key: str, hint: Any) -> Any:
         """Derive a type hint from the schema when none is provided."""
         if hint is None and self._schema is not None:
@@ -455,6 +454,18 @@ class HyprlandState:
         data = self.get_raw(key)
         if data is None:
             return hint
+        return self._extract_value(key, data, hint)
+
+    def _extract_value(self, key: str, data: dict, hint: Any) -> Any:
+        """Extract a typed value from raw IPC option data.
+
+        Handles color conversion from ARGB ints to ``0xAARRGGBB`` hex strings.
+        An unset color (``int: -1`` / ``set: false``) returns *hint*.
+        """
+        if self._option_type(key) == "color" and "int" in data:
+            if not data.get("set", True) and data["int"] < 0:
+                return hint
+            return f"0x{data['int'] & 0xFFFFFFFF:08x}"
         return extract_ipc_value(data, hint)
 
     # -- Validation --
