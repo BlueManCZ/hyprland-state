@@ -1,6 +1,6 @@
 [project]
 name = "hyprland-state"
-version = "0.2.0"
+version = "0.2.1"
 description = "Live state interface for Hyprland — options, animations, monitors, binds, and devices"
 requires-python = ">=3.12"
 license = "MIT"
@@ -26,7 +26,7 @@ dependencies = [
 Repository = "https://github.com/BlueManCZ/hyprland-state"
 
 [dependency-groups]
-dev = ["pyright>=1.1", "pytest>=9.0", "ruff>=0.15"]
+dev = ["pyright>=1.1", "pytest>=9.0.3", "ruff>=0.15"]
 
 [build-system]
 requires = ["hatchling"]

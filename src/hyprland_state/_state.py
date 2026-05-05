@@ -30,6 +30,28 @@ _TYPE_HINTS: dict[str, Any] = {
 }
 
 
+def _normalize_gradient_string(value: str) -> str:
+    """Add ``0x`` prefix to bare ``AARRGGBB`` hex tokens in a gradient string.
+
+    Hyprland's IPC reports gradients as bare hex tokens followed by an angle
+    (``"eeb4e718 ee00ff99 45deg"``), but the config-file parser requires
+    ``0x``-prefixed colors or ``rgba(...)`` wrapping. Normalize on extraction
+    so callers can write the value back to disk without a separate transform.
+    """
+    tokens = value.split()
+    if not tokens or not tokens[-1].endswith("deg"):
+        return value
+    out: list[str] = []
+    for token in tokens:
+        if token.endswith("deg") or token.startswith("0x") or "(" in token:
+            out.append(token)
+        elif len(token) == 8 and all(c in "0123456789abcdefABCDEF" for c in token):
+            out.append(f"0x{token}")
+        else:
+            out.append(token)
+    return " ".join(out)
+
+
 class HyprlandState:
     """Unified interface to Hyprland's live configuration state.
 
@@ -459,13 +481,17 @@ class HyprlandState:
     def _extract_value(self, key: str, data: dict, hint: Any) -> Any:
         """Extract a typed value from raw IPC option data.
 
-        Handles color conversion from ARGB ints to ``0xAARRGGBB`` hex strings.
-        An unset color (``int: -1`` / ``set: false``) returns *hint*.
+        Handles color conversion from ARGB ints to ``0xAARRGGBB`` hex strings,
+        and gradient normalization from bare hex tokens to ``0x``-prefixed
+        colors. An unset color (``int: -1`` / ``set: false``) returns *hint*.
         """
-        if self._option_type(key) == "color" and "int" in data:
+        option_type = self._option_type(key)
+        if option_type == "color" and "int" in data:
             if not data.get("set", True) and data["int"] < 0:
                 return hint
             return f"0x{data['int'] & 0xFFFFFFFF:08x}"
+        if option_type == "gradient" and "custom" in data:
+            return _normalize_gradient_string(data["custom"])
         return extract_ipc_value(data, hint)
 
     # -- Validation --

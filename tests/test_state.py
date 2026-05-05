@@ -406,6 +406,52 @@ class TestReconnect:
         assert offline_state._monitors is None
 
 
+class TestGradientExtraction:
+    """IPC reports gradients as bare hex; we expose them in 0x-prefixed form
+    so callers can round-trip the value into a config file."""
+
+    def test_bare_hex_gets_0x_prefix(self, online_mocks, tmp_config):
+        mock_socket, _ = online_mocks
+        mock_socket.get_option.return_value = {
+            "custom": "eeb4e718 ee00ff99 45deg",
+            "set": True,
+        }
+        state = HyprlandState(tmp_config)
+        val, available = state.get_live("general:col.active_border")
+        assert available
+        assert val == "0xeeb4e718 0xee00ff99 45deg"
+
+    def test_already_prefixed_unchanged(self, online_mocks, tmp_config):
+        mock_socket, _ = online_mocks
+        mock_socket.get_option.return_value = {
+            "custom": "0xeeb4e718 45deg",
+            "set": True,
+        }
+        state = HyprlandState(tmp_config)
+        val, _ = state.get_live("general:col.active_border")
+        assert val == "0xeeb4e718 45deg"
+
+    def test_rgba_wrapped_unchanged(self, online_mocks, tmp_config):
+        mock_socket, _ = online_mocks
+        mock_socket.get_option.return_value = {
+            "custom": "rgba(b4e718ee) 45deg",
+            "set": True,
+        }
+        state = HyprlandState(tmp_config)
+        val, _ = state.get_live("general:col.active_border")
+        assert val == "rgba(b4e718ee) 45deg"
+
+    def test_three_color_gradient(self, online_mocks, tmp_config):
+        mock_socket, _ = online_mocks
+        mock_socket.get_option.return_value = {
+            "custom": "eeb4e718 ee00ff99 ffffffff 45deg",
+            "set": True,
+        }
+        state = HyprlandState(tmp_config)
+        val, _ = state.get_live("general:col.active_border")
+        assert val == "0xeeb4e718 0xee00ff99 0xffffffff 45deg"
+
+
 class TestReloadConfig:
     def test_reload_config_reloads_document(self, offline_state, tmp_config):
         tmp_config.write_text("general {\n    border_size = 99\n}\n")
