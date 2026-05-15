@@ -98,7 +98,7 @@ class Monitors:
         if not self._state.online:
             return False
         lines = lines_from_monitors(monitors)
-        results = hyprland_socket.keyword_batch([("monitor", line) for line in lines])
+        results = self._state._apply_keyword_batch_live([("monitor", line) for line in lines])
         ok = all(r is None for r in results)
         if ok:
             self._cache = sorted([copy(m) for m in monitors], key=lambda m: m.name)
@@ -114,7 +114,7 @@ class Monitors:
         if not self._state.online:
             return False
         try:
-            hyprland_socket.keyword("monitor", f"{name}, disable")
+            self._state._apply_keyword_live("monitor", f"{name}, disable")
             return True
         except hyprland_socket.HyprlandError:
             return False

@@ -2,6 +2,8 @@
 
 from unittest.mock import MagicMock, patch
 
+import hyprland_socket
+
 from hyprland_state import Monitors
 
 
@@ -35,7 +37,7 @@ class TestGetAll:
 
     @patch("hyprland_state._monitors.hyprland_socket")
     def test_returns_monitor_states(self, mock_socket, mock_state):
-        mock_socket.HyprlandError = Exception
+        mock_socket.HyprlandError = hyprland_socket.HyprlandError
         mock_socket.get_monitors.return_value = [_make_ipc_monitor()]
 
         monitors = Monitors(mock_state)
@@ -45,8 +47,8 @@ class TestGetAll:
 
     @patch("hyprland_state._monitors.hyprland_socket")
     def test_ipc_error_returns_empty(self, mock_socket, mock_state):
-        mock_socket.HyprlandError = Exception
-        mock_socket.get_monitors.side_effect = Exception("socket error")
+        mock_socket.HyprlandError = hyprland_socket.HyprlandError
+        mock_socket.get_monitors.side_effect = hyprland_socket.HyprlandError("socket error")
 
         monitors = Monitors(mock_state)
         assert monitors.get_all() == []
@@ -55,7 +57,7 @@ class TestGetAll:
 class TestGet:
     @patch("hyprland_state._monitors.hyprland_socket")
     def test_found(self, mock_socket, mock_state):
-        mock_socket.HyprlandError = Exception
+        mock_socket.HyprlandError = hyprland_socket.HyprlandError
         mock_socket.get_monitors.return_value = [
             _make_ipc_monitor("DP-1"),
             _make_ipc_monitor("HDMI-A-1"),
@@ -68,7 +70,7 @@ class TestGet:
 
     @patch("hyprland_state._monitors.hyprland_socket")
     def test_not_found(self, mock_socket, mock_state):
-        mock_socket.HyprlandError = Exception
+        mock_socket.HyprlandError = hyprland_socket.HyprlandError
         mock_socket.get_monitors.return_value = [_make_ipc_monitor("DP-1")]
 
         monitors = Monitors(mock_state)
@@ -76,16 +78,14 @@ class TestGet:
 
 
 class TestApply:
-    @patch("hyprland_state._monitors.hyprland_socket")
     @patch("hyprland_state._monitors.lines_from_monitors")
-    def test_apply_calls_keyword_batch(self, mock_lines, mock_socket, mock_state):
-        mock_socket.HyprlandError = Exception
+    def test_apply_calls_keyword_batch(self, mock_lines, mock_state):
         mock_lines.return_value = ["DP-1, 1920x1080@60.00Hz, 0x0, 1"]
-        mock_states = [MagicMock()]
+        mock_state._apply_keyword_batch_live.return_value = [None]
 
         monitors = Monitors(mock_state)
-        assert monitors.apply(mock_states)
-        mock_socket.keyword_batch.assert_called_once_with(
+        assert monitors.apply([MagicMock()])
+        mock_state._apply_keyword_batch_live.assert_called_once_with(
             [("monitor", "DP-1, 1920x1080@60.00Hz, 0x0, 1")]
         )
 
@@ -95,12 +95,10 @@ class TestApply:
 
 
 class TestDisable:
-    @patch("hyprland_state._monitors.hyprland_socket")
-    def test_disable_sends_keyword(self, mock_socket, mock_state):
-        mock_socket.HyprlandError = Exception
+    def test_disable_sends_keyword(self, mock_state):
         monitors = Monitors(mock_state)
         assert monitors.disable("DP-2")
-        mock_socket.keyword.assert_called_once_with("monitor", "DP-2, disable")
+        mock_state._apply_keyword_live.assert_called_once_with("monitor", "DP-2, disable")
 
     def test_disable_offline_returns_false(self, mock_state_offline):
         monitors = Monitors(mock_state_offline)

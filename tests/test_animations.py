@@ -2,12 +2,17 @@
 
 from unittest.mock import MagicMock, patch
 
+import hyprland_socket
+import pytest
+from hyprland_config import load
+
 from hyprland_state import (
     ANIM_CHILDREN,
     ANIM_FLAT,
     ANIM_LOOKUP,
     Animations,
     AnimState,
+    HyprlandState,
     get_styles_for,
 )
 
@@ -109,38 +114,32 @@ class TestAnimations:
         assert len(result) == 1
         assert result[0].name == "fade"
 
-    @patch("hyprland_state._animations.hyprland_socket")
-    def test_apply_defines_bezier_when_points_provided(self, mock_socket, mock_state):
-        mock_socket.HyprlandError = Exception
+    def test_apply_defines_bezier_when_points_provided(self, mock_state):
         anims = Animations(mock_state)
         anims.apply("windows", True, 3.0, "myBezier", curve_points=(0.0, 0.0, 0.58, 1.0))
 
         # Should define bezier then apply animation
-        assert mock_socket.keyword.call_count == 2
-        bezier_call = mock_socket.keyword.call_args_list[0]
+        assert mock_state._apply_keyword_live.call_count == 2
+        bezier_call = mock_state._apply_keyword_live.call_args_list[0]
         assert bezier_call[0][0] == "bezier"
-        anim_call = mock_socket.keyword.call_args_list[1]
+        anim_call = mock_state._apply_keyword_live.call_args_list[1]
         assert anim_call[0][0] == "animation"
 
-    @patch("hyprland_state._animations.hyprland_socket")
-    def test_apply_skips_bezier_without_points(self, mock_socket, mock_state):
-        mock_socket.HyprlandError = Exception
+    def test_apply_skips_bezier_without_points(self, mock_state):
         anims = Animations(mock_state)
         anims.apply("windows", True, 3.0, "easeOut")
 
         # Only animation keyword, no bezier (no curve_points provided)
-        assert mock_socket.keyword.call_count == 1
-        assert mock_socket.keyword.call_args[0][0] == "animation"
+        assert mock_state._apply_keyword_live.call_count == 1
+        assert mock_state._apply_keyword_live.call_args[0][0] == "animation"
 
-    @patch("hyprland_state._animations.hyprland_socket")
-    def test_apply_skips_bezier_for_native(self, mock_socket, mock_state):
-        mock_socket.HyprlandError = Exception
+    def test_apply_skips_bezier_for_native(self, mock_state):
         anims = Animations(mock_state)
         anims.apply("windows", True, 3.0, "default")
 
         # Only animation keyword, no bezier
-        assert mock_socket.keyword.call_count == 1
-        assert mock_socket.keyword.call_args[0][0] == "animation"
+        assert mock_state._apply_keyword_live.call_count == 1
+        assert mock_state._apply_keyword_live.call_args[0][0] == "animation"
 
     def test_apply_state_skips_non_overridden(self, mock_state):
         anims = Animations(mock_state)
@@ -176,8 +175,6 @@ class TestGetFallback:
         main = tmp_path / "main.conf"
         main.write_text(f"source = {user}\nsource = {managed}\n")
 
-        from hyprland_config import load
-
         doc = load(main)
         mock_state.document = doc
 
@@ -198,8 +195,6 @@ class TestGetFallback:
         main = tmp_path / "main.conf"
         main.write_text(f"source = {user}\nsource = {managed}\n")
 
-        from hyprland_config import load
-
         doc = load(main)
         mock_state.document = doc
 
@@ -216,8 +211,6 @@ class TestGetFallback:
 
         main = tmp_path / "main.conf"
         main.write_text(f"source = {managed}\n")
-
-        from hyprland_config import load
 
         doc = load(main)
         mock_state.document = doc
@@ -239,8 +232,6 @@ class TestGetFallback:
         main = tmp_path / "main.conf"
         main.write_text(f"source = {user1}\nsource = {user2}\nsource = {managed}\n")
 
-        from hyprland_config import load
-
         doc = load(main)
         mock_state.document = doc
 
@@ -249,3 +240,42 @@ class TestGetFallback:
         assert fb is not None
         assert fb.speed == 7.0
         assert fb.curve == "ease"
+
+
+class TestLuaModeLiveApply:
+    """Live-apply must use ``hyprctl eval`` in Lua mode.
+
+    Hyprland 0.55.0+ rejects ``hyprctl keyword`` for Lua-mode configs with
+    "keyword can't work with non-legacy parsers". The Animations subsystem
+    must therefore go through ``HyprlandState._apply_keyword_live``, which
+    translates to ``hyprctl eval`` with the equivalent ``hl.*`` call.
+    """
+
+    @pytest.fixture
+    def lua_state(self, tmp_path):
+        conf = tmp_path / "hyprland.conf"
+        conf.write_text("general {\n    border_size = 2\n}\n")
+        with (
+            patch("hyprland_state._state.hyprland_socket") as state_socket,
+            patch("hyprland_state._animations.hyprland_socket") as anim_socket,
+        ):
+            state_socket.HyprlandError = hyprland_socket.HyprlandError
+            state_socket.get_version.return_value = MagicMock(version="0.55.0")
+            anim_socket.HyprlandError = hyprland_socket.HyprlandError
+            state = HyprlandState(conf, schema=None)
+            state._lua_mode = True
+            yield state, state_socket
+
+    def test_apply_routes_animation_through_eval_lua(self, lua_state):
+        state, socket = lua_state
+        state.animations.apply("windows", True, 3.0, "default")
+        socket.keyword.assert_not_called()
+        socket.eval_lua.assert_called_once()
+        assert "hl.animation" in socket.eval_lua.call_args[0][0]
+
+    def test_define_bezier_routes_through_eval_lua(self, lua_state):
+        state, socket = lua_state
+        state.animations.define_bezier("myCurve", (0.0, 0.0, 1.0, 1.0))
+        socket.keyword.assert_not_called()
+        socket.eval_lua.assert_called_once()
+        assert "hl.curve" in socket.eval_lua.call_args[0][0]

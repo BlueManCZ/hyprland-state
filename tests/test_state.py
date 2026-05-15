@@ -4,8 +4,9 @@ from unittest.mock import MagicMock, patch
 
 import hyprland_socket
 import pytest
+from hyprland_schema import HyprOption
 
-from hyprland_state import HyprlandState, OptionInfo
+from hyprland_state import HyprlandState
 
 
 @pytest.fixture
@@ -31,9 +32,14 @@ def online_mocks():
         patch("hyprland_state._state.hyprland_socket") as mock_socket,
         patch("hyprland_state._state.hyprland_config") as mock_config,
     ):
-        mock_socket.HyprlandError = Exception
+        mock_socket.HyprlandError = hyprland_socket.HyprlandError
+        mock_socket.CommandError = hyprland_socket.CommandError
+        mock_socket.SocketError = hyprland_socket.SocketError
         mock_socket.get_version.return_value = MagicMock(version="0.54.2")
-        mock_config.load.return_value = MagicMock()
+        # Default to legacy mode so existing tests don't have to opt in;
+        # Lua-mode tests override with ``state._lua_mode = True``.
+        mock_socket.get_status.return_value = {"configProvider": "legacy"}
+        mock_config.load_any.return_value = MagicMock()
         yield mock_socket, mock_config
 
 
@@ -100,7 +106,7 @@ class TestPending:
 class TestSaveDiscard:
     def test_save_writes_pending_to_document(self, online_mocks, tmp_config):
         mock_socket, mock_config = online_mocks
-        mock_doc = mock_config.load.return_value
+        mock_doc = mock_config.load_any.return_value
         mock_doc.dirty_files.return_value = [tmp_config]
 
         state = HyprlandState(tmp_config, schema=None)
@@ -114,7 +120,7 @@ class TestSaveDiscard:
 
     def test_discard_reverts_and_clears(self, online_mocks, tmp_config):
         mock_socket, mock_config = online_mocks
-        mock_doc = mock_config.load.return_value
+        mock_doc = mock_config.load_any.return_value
         mock_doc.get.return_value = "2"
 
         state = HyprlandState(tmp_config, schema=None)
@@ -142,9 +148,24 @@ class TestSaveDiscard:
         assert "border_size = 99" in content
 
 
+def _make_schema_opt(**kwargs) -> HyprOption:
+    key = kwargs.get("key", "general:border_size")
+    return HyprOption(
+        key=key,
+        section=tuple(key.split(":")[:-1]),
+        name=key.rsplit(":", 1)[-1],
+        description=kwargs.get("description", ""),
+        type=kwargs.get("type", "int"),
+        default=kwargs.get("default", 1),
+        min=kwargs.get("min", 0),
+        max=kwargs.get("max", 20),
+        enum_values=kwargs.get("enum_values"),
+    )
+
+
 class TestSchemaIntegration:
     def test_get_default(self, tmp_config):
-        schema = {"general:border_size": MagicMock(type="int", default=1)}
+        schema = {"general:border_size": _make_schema_opt(default=1)}
         state = HyprlandState(tmp_config, offline=True, schema=schema)
         assert state.get_default("general:border_size") == 1
 
@@ -156,35 +177,17 @@ class TestSchemaIntegration:
         assert offline_state.get_default("anything") is None
 
     def test_inspect(self, tmp_config):
-        opt = MagicMock()
-        opt.key = "general:border_size"
-        opt.type = "int"
-        opt.default = 1
-        opt.description = "Border size"
-        opt.min = 0
-        opt.max = 20
-        opt.enum_values = None
+        opt = _make_schema_opt(description="Border size", min=0, max=20)
         state = HyprlandState(tmp_config, offline=True, schema={"general:border_size": opt})
 
         info = state.inspect("general:border_size")
-        assert isinstance(info, OptionInfo)
+        assert isinstance(info, HyprOption)
+        assert info is opt
         assert info.type == "int"
         assert info.default == 1
 
     def test_inspect_missing(self, offline_state):
         assert offline_state.inspect("anything") is None
-
-
-def _make_schema_opt(**kwargs):
-    opt = MagicMock()
-    opt.key = kwargs.get("key", "general:border_size")
-    opt.type = kwargs.get("type", "int")
-    opt.default = kwargs.get("default", 1)
-    opt.description = kwargs.get("description", "")
-    opt.min = kwargs.get("min", 0)
-    opt.max = kwargs.get("max", 20)
-    opt.enum_values = kwargs.get("enum_values", None)
-    return opt
 
 
 class TestValidation:
@@ -304,7 +307,7 @@ class TestOnlineWithMocks:
 
     def test_available_false(self, online_mocks, tmp_config):
         mock_socket, _ = online_mocks
-        mock_socket.get_option.side_effect = Exception("unknown")
+        mock_socket.get_option.side_effect = hyprland_socket.HyprlandError("unknown")
 
         state = HyprlandState(tmp_config, schema=None)
         assert not state.available("nonexistent:option")
@@ -451,9 +454,231 @@ class TestGradientExtraction:
         val, _ = state.get_live("general:col.active_border")
         assert val == "0xeeb4e718 0xee00ff99 0xffffffff 45deg"
 
+    def test_hyprland_055_uses_gradient_field(self, online_mocks, tmp_config):
+        # Hyprland 0.55 renamed the IPC field from ``custom`` to ``gradient``.
+        # We accept either so the value populates on both compositor versions.
+        mock_socket, _ = online_mocks
+        mock_socket.get_option.return_value = {
+            "gradient": "eeb4e718 ee00ff99 45deg",
+            "set": True,
+        }
+        state = HyprlandState(tmp_config)
+        val, available = state.get_live("general:col.active_border")
+        assert available
+        assert val == "0xeeb4e718 0xee00ff99 45deg"
+
 
 class TestReloadConfig:
     def test_reload_config_reloads_document(self, offline_state, tmp_config):
         tmp_config.write_text("general {\n    border_size = 99\n}\n")
         offline_state.reload_config()
         assert offline_state.get_disk("general:border_size") == "99"
+
+
+class TestLuaModeDetection:
+    """``is_live_lua_mode`` probes ``hyprctl status`` and caches the answer.
+
+    A transient failure must *not* be cached — otherwise the instance
+    silently routes through the wrong path for the rest of its life if
+    the very first probe hit a temporary socket hiccup.
+    """
+
+    def test_returns_true_on_lua_provider(self, online_mocks, tmp_config):
+        mock_socket, _ = online_mocks
+        mock_socket.get_status.return_value = {"configProvider": "lua"}
+        state = HyprlandState(tmp_config, schema=None)
+        assert state.is_live_lua_mode() is True
+
+    def test_returns_false_on_legacy_provider(self, online_mocks, tmp_config):
+        mock_socket, _ = online_mocks
+        mock_socket.get_status.return_value = {"configProvider": "legacy"}
+        state = HyprlandState(tmp_config, schema=None)
+        assert state.is_live_lua_mode() is False
+
+    def test_offline_returns_false_without_ipc(self, offline_state):
+        # No get_status call should happen when offline — there's no
+        # mock here, so any IPC attempt would raise AttributeError.
+        assert offline_state.is_live_lua_mode() is False
+
+    def test_caches_after_successful_probe(self, online_mocks, tmp_config):
+        mock_socket, _ = online_mocks
+        mock_socket.get_status.return_value = {"configProvider": "lua"}
+        state = HyprlandState(tmp_config, schema=None)
+        state.is_live_lua_mode()
+        state.is_live_lua_mode()
+        state.is_live_lua_mode()
+        # One probe for any number of calls.
+        assert mock_socket.get_status.call_count == 1
+
+    def test_transient_failure_is_not_cached(self, online_mocks, tmp_config):
+        mock_socket, _ = online_mocks
+        # First call fails, second succeeds — second answer must win.
+        mock_socket.get_status.side_effect = [
+            hyprland_socket.HyprlandError("transient"),
+            {"configProvider": "lua"},
+        ]
+        state = HyprlandState(tmp_config, schema=None)
+        assert state.is_live_lua_mode() is False  # uncached miss
+        assert state.is_live_lua_mode() is True  # recovered on retry
+
+    def test_reconnect_clears_cache(self, online_mocks, tmp_config):
+        mock_socket, _ = online_mocks
+        mock_socket.get_status.return_value = {"configProvider": "legacy"}
+        state = HyprlandState(tmp_config, schema=None)
+        assert state.is_live_lua_mode() is False
+
+        # The user reboots Hyprland with a Lua entrypoint — reconnect()
+        # must re-probe instead of returning the stale legacy answer.
+        mock_socket.get_status.return_value = {"configProvider": "lua"}
+        state.reconnect()
+        assert state.is_live_lua_mode() is True
+
+
+class TestDispatch:
+    def test_dispatch_offline_returns_false(self, offline_state):
+        assert offline_state.dispatch("killactive") is False
+
+    def test_dispatch_legacy_uses_dispatch_ipc(self, online_mocks, tmp_config):
+        mock_socket, _ = online_mocks
+        state = HyprlandState(tmp_config, schema=None)
+        state._lua_mode = False  # force legacy
+
+        state.dispatch("togglefloating", "address:0xabc")
+
+        mock_socket.dispatch.assert_called_once_with("togglefloating", "address:0xabc")
+        mock_socket.eval_lua.assert_not_called()
+
+    def test_dispatch_lua_mode_routes_through_eval(self, online_mocks, tmp_config):
+        """Lua-mode dispatch goes through ``eval`` with ``hl.dispatch(hl.dsp.*())``.
+
+        ``hl.dispatch`` takes a dispatcher *value* (an ``hl.dsp.*`` call),
+        not a string — Hyprland's legacy shorthand was broken in two ways
+        (no quoting AND wrong form), so we bypass it entirely.
+        """
+        mock_socket, mock_config = online_mocks
+        mock_config.dispatch_to_lua.return_value = 'hl.dispatch(hl.dsp.submap("reset"))'
+        state = HyprlandState(tmp_config, schema=None)
+        state._lua_mode = True
+
+        state.dispatch("submap", "reset")
+
+        mock_socket.dispatch.assert_not_called()
+        mock_socket.eval_lua.assert_called_once_with('hl.dispatch(hl.dsp.submap("reset"))')
+
+    def test_dispatch_lua_mode_unmapped_surfaces_as_command_error(self, online_mocks, tmp_config):
+        """A dispatch with no Lua mapping must raise ``CommandError`` —
+        callers catch ``HyprlandError`` and expect IPC-style failures, not
+        ``ValueError`` from the translation layer."""
+        mock_socket, mock_config = online_mocks
+        mock_config.dispatch_to_lua.side_effect = ValueError("No Lua mapping")
+        state = HyprlandState(tmp_config, schema=None)
+        state._lua_mode = True
+
+        with pytest.raises(hyprland_socket.CommandError, match="No Lua mapping"):
+            state.dispatch("notarealdispatcher")
+
+
+class TestDefineSubmap:
+    """Atomic submap registration — abstracts over Hyprlang vs Lua mode.
+
+    Lua's submap API is declarative (binds defined inside ``hl.define_submap``'s
+    function body), so the streaming Hyprlang ``keyword`` sequence has no
+    line-by-line Lua equivalent. ``define_submap`` collapses both into one
+    method.
+    """
+
+    def test_offline_returns_false(self, offline_state):
+        assert offline_state.define_submap("test", [("bind", ", X, noop,")]) is False
+
+    def test_legacy_sends_keyword_batch(self, online_mocks, tmp_config):
+        mock_socket, _ = online_mocks
+        mock_socket.keyword_batch.return_value = [None, None, None]
+        state = HyprlandState(tmp_config, schema=None)
+        state._lua_mode = False
+
+        state.define_submap("capture", [("bind", ", XF86LaunchA, noop,")])
+
+        # ``submap=NAME`` → bind(s) → ``submap=reset`` in a single batch
+        # so they land in one event-loop iteration on the compositor.
+        mock_socket.keyword_batch.assert_called_once_with(
+            [
+                ("submap", "capture"),
+                ("bind", ", XF86LaunchA, noop,"),
+                ("submap", "reset"),
+            ]
+        )
+        mock_socket.eval_lua.assert_not_called()
+
+    def test_legacy_empty_binds_raises(self, online_mocks, tmp_config):
+        mock_socket, _ = online_mocks
+        state = HyprlandState(tmp_config, schema=None)
+        state._lua_mode = False
+
+        with pytest.raises(hyprland_socket.CommandError, match="no binds"):
+            state.define_submap("empty", [])
+        mock_socket.keyword_batch.assert_not_called()
+
+    def test_legacy_batch_failure_raises(self, online_mocks, tmp_config):
+        mock_socket, _ = online_mocks
+        # Second command (the bind) is rejected by Hyprland.
+        mock_socket.keyword_batch.return_value = [None, "bad bind syntax", None]
+        state = HyprlandState(tmp_config, schema=None)
+        state._lua_mode = False
+
+        with pytest.raises(hyprland_socket.CommandError, match="bad bind syntax"):
+            state.define_submap("capture", [("bind", ", XF86LaunchA, noop,")])
+
+    def test_lua_mode_sends_one_eval(self, online_mocks, tmp_config):
+        mock_socket, mock_config = online_mocks
+        mock_config.define_submap_to_lua.return_value = (
+            'hl.define_submap("capture", function()\n  hl.bind("X", hl.dsp.no_op())\nend)'
+        )
+        state = HyprlandState(tmp_config, schema=None)
+        state._lua_mode = True
+
+        state.define_submap("capture", [("bind", ", XF86LaunchA, noop,")])
+
+        mock_socket.keyword.assert_not_called()
+        mock_socket.eval_lua.assert_called_once()
+        assert "hl.define_submap" in mock_socket.eval_lua.call_args[0][0]
+
+    def test_lua_mode_untranslatable_bind_raises_command_error(self, online_mocks, tmp_config):
+        mock_socket, mock_config = online_mocks
+        mock_config.define_submap_to_lua.side_effect = ValueError(
+            "No Lua mapping for 'bind' = 'SUPER, K, bogus,'"
+        )
+        state = HyprlandState(tmp_config, schema=None)
+        state._lua_mode = True
+
+        with pytest.raises(hyprland_socket.CommandError, match="No Lua mapping"):
+            state.define_submap("bad", [("bind", "SUPER, K, bogus,")])
+
+
+class TestKeywordLuaModeErrors:
+    """Unmapped keywords in Lua mode surface as CommandError, not ValueError.
+
+    Callers throughout hyprmod catch ``HyprlandError`` (the legacy-mode
+    failure mode); a raw ``ValueError`` from ``keyword_to_lua`` would
+    propagate uncaught and crash flows like the bind-capture submap setup.
+    """
+
+    def test_unmapped_keyword_in_lua_mode_raises_command_error(self, online_mocks, tmp_config):
+        mock_socket, mock_config = online_mocks
+        mock_config.keyword_to_lua.side_effect = ValueError(
+            "No Lua mapping for keyword 'submap' = 'foo'"
+        )
+        state = HyprlandState(tmp_config, schema=None)
+        state._lua_mode = True
+
+        with pytest.raises(hyprland_socket.CommandError, match="No Lua mapping"):
+            state.keyword("submap", "foo")
+
+    def test_mapped_keyword_in_lua_mode_evals(self, online_mocks, tmp_config):
+        mock_socket, mock_config = online_mocks
+        mock_config.keyword_to_lua.return_value = 'hl.env("X", "1")'
+        state = HyprlandState(tmp_config, schema=None)
+        state._lua_mode = True
+
+        state.keyword("env", "X, 1")
+
+        mock_socket.eval_lua.assert_called_once_with('hl.env("X", "1")')

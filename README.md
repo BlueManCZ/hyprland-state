@@ -82,6 +82,29 @@ state.apply("general:border_size", 999)  # ValueError: above maximum 20
 state.apply("general:border_size", 999, validate=False)
 ```
 
+## Lua-mode configs (Hyprland 0.55+)
+
+When the running compositor was started with a `hyprland.lua` entrypoint (`configProvider: lua`), the legacy `hyprctl keyword` IPC is rejected. `HyprlandState` detects this once via `is_live_lua_mode()` and transparently routes `apply()`, `apply_batch()`, `keyword()`, and `dispatch()` through `hyprctl eval` with the equivalent `hl.*` snippet — callers don't have to branch:
+
+```python
+state = HyprlandState()
+state.is_live_lua_mode()  # True on a Hyprland 0.55+ Lua config
+
+state.apply("general:border_size", 3)   # hl.config({ general = { border_size = 3 } })
+state.dispatch("workspace", "1")        # hl.dispatch(hl.dsp.workspace(1))
+```
+
+For submap registration use `define_submap()` — the bare `submap` keyword has no per-line Lua equivalent (Lua's submap API is declarative), and the method also batches the Hyprlang `submap=` / `bind=` / `submap=reset` sequence atomically:
+
+```python
+state.define_submap("resize", [
+    ("bind", ", H, resizeactive, -10 0"),
+    ("bind", ", L, resizeactive, 10 0"),
+])
+```
+
+Untranslatable keywords or dispatchers (e.g. a dispatcher with no `hl.dsp.*` mapping) surface as `hyprland_socket.CommandError`, matching the legacy-mode failure mode.
+
 ## Offline mode
 
 Works without a running Hyprland instance — reads from config files and schema:

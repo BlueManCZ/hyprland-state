@@ -1,4 +1,4 @@
-"""Live state interface for Hyprland — options, animations, monitors, and bezier."""
+"""Live state interface for Hyprland — options, animations, monitors, binds, and devices."""
 
 from hyprland_state._animations import (
     ANIM_CHILDREN,
@@ -11,23 +11,17 @@ from hyprland_state._animations import (
     get_styles_for,
 )
 from hyprland_state._monitors import Monitors
-from hyprland_state._options import OptionInfo
 from hyprland_state._state import HyprlandState
 
 __all__ = [
-    # State
-    "HyprlandState",
-    "OptionInfo",
-    # Subsystems
-    "Animations",
-    "Monitors",
-    # Animations
     "ANIM_CHILDREN",
     "ANIM_FLAT",
     "ANIM_LOOKUP",
     "ANIMATION_TREE",
     "AnimState",
-    "get_styles_for",
-    # Bezier
+    "Animations",
     "HYPRLAND_NATIVE_CURVES",
+    "HyprlandState",
+    "Monitors",
+    "get_styles_for",
 ]

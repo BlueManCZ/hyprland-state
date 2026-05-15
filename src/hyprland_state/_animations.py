@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Any, Self
 
 import hyprland_socket
 
@@ -92,17 +92,17 @@ _FlatEntry = tuple[str, str | None, int, tuple[str, ...]]
 
 def _flatten_tree(
     tree: tuple[_TreeNode, ...], parent: str | None = None, depth: int = 0
-) -> list[_FlatEntry]:
-    """Flatten the animation tree into an ordered list of (name, parent, depth, styles)."""
+) -> tuple[_FlatEntry, ...]:
+    """Flatten the animation tree into an ordered tuple of (name, parent, depth, styles)."""
     result: list[_FlatEntry] = []
     for name, styles, children in tree:
         result.append((name, parent, depth, styles))
         result.extend(_flatten_tree(children, parent=name, depth=depth + 1))
-    return result
+    return tuple(result)
 
 
-# Flat list: [(name, parent_name, depth, own_styles)]
-ANIM_FLAT: list[_FlatEntry] = [("global", None, 0, ())] + _flatten_tree(
+# Flat tree: ((name, parent_name, depth, own_styles), ...)
+ANIM_FLAT: tuple[_FlatEntry, ...] = (("global", None, 0, ()),) + _flatten_tree(
     ANIMATION_TREE, parent="global", depth=1
 )
 
@@ -112,16 +112,16 @@ ANIM_LOOKUP: dict[str, tuple[str | None, int, tuple[str, ...]]] = {
 }
 
 
-# Children lookup: parent_name -> [child_names]
-def _build_children(flat: list[_FlatEntry]) -> dict[str, list[str]]:
+# Children lookup: parent_name -> (child_names, ...)
+def _build_children(flat: tuple[_FlatEntry, ...]) -> dict[str, tuple[str, ...]]:
     children: dict[str, list[str]] = {}
     for name, parent, _, _ in flat:
         if parent is not None:
             children.setdefault(parent, []).append(name)
-    return children
+    return {parent: tuple(names) for parent, names in children.items()}
 
 
-ANIM_CHILDREN: dict[str, list[str]] = _build_children(ANIM_FLAT)
+ANIM_CHILDREN: dict[str, tuple[str, ...]] = _build_children(ANIM_FLAT)
 
 
 def get_styles_for(name: str) -> tuple[str, ...]:
@@ -333,7 +333,7 @@ class Animations:
         cache = self._ensure_cache()
         changed = [name for name in cache if cache[name] != self._baseline.get(name)]
         self._cache = dict(self._baseline)
-        batch = []
+        batch: list[tuple[str, Any]] = []
         for name in changed:
             state = self._cache.get(name)
             if state and state.overridden:
@@ -346,7 +346,7 @@ class Animations:
                     )
                 )
         if batch and self._state.online:
-            hyprland_socket.keyword_batch(batch)
+            self._state._apply_keyword_batch_live(batch)
         for name in changed:
             self._state._notify("animations", name)
 
@@ -375,7 +375,9 @@ class Animations:
     ) -> bool:
         """Define the bezier (if needed) and send the animation keyword via IPC.
 
-        Returns ``False`` if offline or the IPC command fails.
+        Returns ``False`` if offline. Raises
+        :class:`hyprland_socket.HyprlandError` if the compositor rejects
+        the keyword, matching the failure mode of :meth:`HyprlandState.apply`.
         """
         if not self._state.online:
             return False
@@ -383,11 +385,8 @@ class Animations:
         if curve not in HYPRLAND_NATIVE_CURVES and curve_points:
             self.define_bezier(curve, curve_points)
 
-        try:
-            value = _format_animation_kw(name, enabled, speed, curve, style)
-            hyprland_socket.keyword("animation", value)
-        except hyprland_socket.HyprlandError:
-            return False
+        value = _format_animation_kw(name, enabled, speed, curve, style)
+        self._state._apply_keyword_live("animation", value)
         return True
 
     def apply(
@@ -464,15 +463,17 @@ class Animations:
         return self._send_animation(name, enabled, speed, curve, style, curve_points=curve_points)
 
     def define_bezier(self, name: str, points: tuple[float, float, float, float]) -> bool:
-        """Define a bezier curve in the running compositor."""
+        """Define a bezier curve in the running compositor.
+
+        Returns ``False`` if offline. Raises
+        :class:`hyprland_socket.HyprlandError` if the compositor rejects
+        the keyword.
+        """
         if not self._state.online:
             return False
         x0, y0, x1, y1 = points
-        try:
-            hyprland_socket.keyword("bezier", f"{name},{x0},{y0},{x1},{y1}")
-            return True
-        except hyprland_socket.HyprlandError:
-            return False
+        self._state._apply_keyword_live("bezier", f"{name},{x0},{y0},{x1},{y1}")
+        return True
 
     # -- Inspect --
 
@@ -485,9 +486,9 @@ class Animations:
         entry = ANIM_LOOKUP.get(name)
         return entry[0] if entry else None
 
-    def get_children(self, name: str) -> list[str]:
+    def get_children(self, name: str) -> tuple[str, ...]:
         """Return direct children of an animation node."""
-        return ANIM_CHILDREN.get(name, [])
+        return ANIM_CHILDREN.get(name, ())
 
     def get_effective(self, name: str) -> tuple[bool, float, str, str]:
         """Resolve effective values by walking up the parent chain.
@@ -526,11 +527,11 @@ class Animations:
         return None
 
     @property
-    def tree(self) -> list[_FlatEntry]:
-        """Return the flat animation tree: ``[(name, parent, depth, styles), ...]``."""
+    def tree(self) -> tuple[_FlatEntry, ...]:
+        """Return the flat animation tree: ``((name, parent, depth, styles), ...)``."""
         return ANIM_FLAT
 
     @property
-    def names(self) -> list[str]:
+    def names(self) -> tuple[str, ...]:
         """Return all animation names in tree order."""
-        return [name for name, _, _, _ in ANIM_FLAT]
+        return tuple(name for name, _, _, _ in ANIM_FLAT)
