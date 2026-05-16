@@ -1,6 +1,6 @@
 [project]
 name = "hyprland-state"
-version = "0.3.0"
+version = "0.4.0"
 description = "Live state interface for Hyprland — options, animations, monitors, binds, and devices"
 requires-python = ">=3.12"
 license = "MIT"
@@ -16,10 +16,10 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "hyprland-config>=0.5.0",
+    "hyprland-config>=0.6.1",
     "hyprland-monitors>=0.5.0",
     "hyprland-schema>=0.6.0",
-    "hyprland-socket>=0.12.0",
+    "hyprland-socket>=0.12.1",
 ]
 
 [project.urls]

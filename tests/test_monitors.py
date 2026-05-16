@@ -81,11 +81,11 @@ class TestApply:
     @patch("hyprland_state._monitors.lines_from_monitors")
     def test_apply_calls_keyword_batch(self, mock_lines, mock_state):
         mock_lines.return_value = ["DP-1, 1920x1080@60.00Hz, 0x0, 1"]
-        mock_state._apply_keyword_batch_live.return_value = [None]
+        mock_state._send_keyword_batch.return_value = [None]
 
         monitors = Monitors(mock_state)
         assert monitors.apply([MagicMock()])
-        mock_state._apply_keyword_batch_live.assert_called_once_with(
+        mock_state._send_keyword_batch.assert_called_once_with(
             [("monitor", "DP-1, 1920x1080@60.00Hz, 0x0, 1")]
         )
 
@@ -98,7 +98,7 @@ class TestDisable:
     def test_disable_sends_keyword(self, mock_state):
         monitors = Monitors(mock_state)
         assert monitors.disable("DP-2")
-        mock_state._apply_keyword_live.assert_called_once_with("monitor", "DP-2, disable")
+        mock_state._send_keyword.assert_called_once_with("monitor", "DP-2, disable")
 
     def test_disable_offline_returns_false(self, mock_state_offline):
         monitors = Monitors(mock_state_offline)

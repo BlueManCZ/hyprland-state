@@ -133,6 +133,46 @@ class TestSaveDiscard:
         # Should have sent the on-disk value back via keyword_batch
         mock_socket.keyword_batch.assert_called_once_with([("general:border_size", "2")])
 
+    def test_discard_falls_back_to_schema_default(self, online_mocks, tmp_config):
+        """When an option has no on-disk value, discard reverts to the schema default."""
+        mock_socket, mock_config = online_mocks
+        mock_doc = mock_config.load_any.return_value
+        # Document has nothing for this key — simulates an option the user
+        # set live but never saved to disk.
+        mock_doc.get.return_value = None
+
+        schema = {
+            "general:border_size": HyprOption(
+                key="general:border_size",
+                section=("general",),
+                name="border_size",
+                description="",
+                type="int",
+                default=1,
+            ),
+        }
+        state = HyprlandState(tmp_config, schema=schema)
+        state.apply("general:border_size", 5, validate=False)
+        reverted = state.discard()
+
+        assert reverted == {"general:border_size": 1}
+        # The schema default should have been sent back via IPC, so the
+        # caller doesn't need to paper over the gap.
+        mock_socket.keyword_batch.assert_called_once_with([("general:border_size", 1)])
+
+    def test_discard_returns_none_when_no_disk_and_no_default(self, online_mocks, tmp_config):
+        """No on-disk value and no schema default → None, no IPC call."""
+        mock_socket, mock_config = online_mocks
+        mock_doc = mock_config.load_any.return_value
+        mock_doc.get.return_value = None
+
+        state = HyprlandState(tmp_config, schema=None)  # no schema at all
+        state.apply("general:border_size", 5, validate=False)
+        reverted = state.discard()
+
+        assert reverted == {"general:border_size": None}
+        mock_socket.keyword_batch.assert_not_called()
+
     def test_clear_pending(self, online_mocks, tmp_config):
         state = HyprlandState(tmp_config, schema=None)
         state.apply("general:border_size", 5)

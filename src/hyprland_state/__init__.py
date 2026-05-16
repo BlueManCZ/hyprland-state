@@ -12,6 +12,12 @@ from hyprland_state._animations import (
 )
 from hyprland_state._monitors import Monitors
 from hyprland_state._state import HyprlandState
+from hyprland_state._windows import (
+    RETROACTIVE_EFFECTS,
+    SETPROP_PASSTHROUGH_EFFECTS,
+    dispatchers_for_effect,
+    revert_dispatchers_for_effect,
+)
 
 __all__ = [
     "ANIM_CHILDREN",
@@ -23,5 +29,9 @@ __all__ = [
     "HYPRLAND_NATIVE_CURVES",
     "HyprlandState",
     "Monitors",
+    "RETROACTIVE_EFFECTS",
+    "SETPROP_PASSTHROUGH_EFFECTS",
+    "dispatchers_for_effect",
     "get_styles_for",
+    "revert_dispatchers_for_effect",
 ]

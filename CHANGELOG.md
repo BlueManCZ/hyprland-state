@@ -5,6 +5,20 @@ All notable changes to hyprland-state will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-05-16
+
+### Added
+
+- `hyprland_state.dispatchers_for_effect(name, args, window)` and `revert_dispatchers_for_effect(name, args, window)` — per-window retroactive dispatch translation for Hyprland window-rule effects. Returns the `(dispatcher, arg)` tuples that bring an already-mapped window into a rule's target state (apply path) or back out of it (revert path).
+- `hyprland_state.SETPROP_PASSTHROUGH_EFFECTS` and `hyprland_state.RETROACTIVE_EFFECTS` — frozensets exposing the curated effect catalog used by the dispatch helpers. Callers can use `RETROACTIVE_EFFECTS` as a fast-path predicate to skip the `get_windows` IPC round-trip when no outgoing effect could mutate existing windows.
+- `Monitors.get_all_cached()` — list-returning counterpart to the renamed `get_cached()` (see Changed).
+- `AnimState.from_keyword()`, `body()`, `to_line()`, `to_data()` — parse/serialize helpers that mirror `hyprland_config.AnimationData`'s shape, with `to_data()` projecting to the format-only sibling.
+
+### Changed
+
+- **BREAKING** — `Monitors.get_cached()` now takes a `name` argument and returns `MonitorState | None`, matching `Animations.get_cached(name)`. The previous list-returning form is now `Monitors.get_all_cached()`.
+- `HyprlandState.discard()` now falls back to the schema default when an option has no on-disk value, so a single discard call fully restores the compositor to its pre-edit state. Previously it returned `None` for those keys and required the caller to send a fallback value via IPC.
+
 ## [0.3.0] - 2026-05-15
 
 ### Added
@@ -56,6 +70,7 @@ Initial release — live state interface for Hyprland — options, animations, m
 - **Offline mode** — works without a running Hyprland instance, reads from config files and schema.
 - **Schema validation** — values validated against schema constraints (min/max, enum) before being sent to the compositor.
 
+[0.4.0]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.4.0
 [0.3.0]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.3.0
 [0.2.1]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.2.1
 [0.2.0]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.2.0

@@ -119,10 +119,10 @@ class TestAnimations:
         anims.apply("windows", True, 3.0, "myBezier", curve_points=(0.0, 0.0, 0.58, 1.0))
 
         # Should define bezier then apply animation
-        assert mock_state._apply_keyword_live.call_count == 2
-        bezier_call = mock_state._apply_keyword_live.call_args_list[0]
+        assert mock_state._send_keyword.call_count == 2
+        bezier_call = mock_state._send_keyword.call_args_list[0]
         assert bezier_call[0][0] == "bezier"
-        anim_call = mock_state._apply_keyword_live.call_args_list[1]
+        anim_call = mock_state._send_keyword.call_args_list[1]
         assert anim_call[0][0] == "animation"
 
     def test_apply_skips_bezier_without_points(self, mock_state):
@@ -130,16 +130,16 @@ class TestAnimations:
         anims.apply("windows", True, 3.0, "easeOut")
 
         # Only animation keyword, no bezier (no curve_points provided)
-        assert mock_state._apply_keyword_live.call_count == 1
-        assert mock_state._apply_keyword_live.call_args[0][0] == "animation"
+        assert mock_state._send_keyword.call_count == 1
+        assert mock_state._send_keyword.call_args[0][0] == "animation"
 
     def test_apply_skips_bezier_for_native(self, mock_state):
         anims = Animations(mock_state)
         anims.apply("windows", True, 3.0, "default")
 
         # Only animation keyword, no bezier
-        assert mock_state._apply_keyword_live.call_count == 1
-        assert mock_state._apply_keyword_live.call_args[0][0] == "animation"
+        assert mock_state._send_keyword.call_count == 1
+        assert mock_state._send_keyword.call_args[0][0] == "animation"
 
     def test_apply_state_skips_non_overridden(self, mock_state):
         anims = Animations(mock_state)
@@ -247,7 +247,7 @@ class TestLuaModeLiveApply:
 
     Hyprland 0.55.0+ rejects ``hyprctl keyword`` for Lua-mode configs with
     "keyword can't work with non-legacy parsers". The Animations subsystem
-    must therefore go through ``HyprlandState._apply_keyword_live``, which
+    must therefore go through ``HyprlandState._send_keyword``, which
     translates to ``hyprctl eval`` with the equivalent ``hl.*`` call.
     """
 

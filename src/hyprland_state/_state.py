@@ -34,7 +34,7 @@ _TYPE_HINTS: dict[str, Any] = {
 # Schema defaults lie about storage shape for CSS-shorthand types
 # (e.g. ``gaps_in`` default is ``5`` but ``gaps_in = "5 10 5 10"`` is valid).
 # For these, prefer the type-derived hint from ``_TYPE_HINTS`` over the default.
-_FORCE_TYPE_HINT = frozenset({"cssgap", "font_weight"})
+_PREFER_TYPE_HINT_OVER_DEFAULT = frozenset({"cssgap", "font_weight"})
 
 
 def _load_user_document(path: str | Path | None) -> Document:
@@ -254,14 +254,14 @@ class HyprlandState:
             raise hyprland_socket.CommandError(str(exc)) from exc
         hyprland_socket.eval_lua(snippet)
 
-    def _apply_keyword_live(self, key: str, value: Any) -> None:
+    def _send_keyword(self, key: str, value: Any) -> None:
         """Apply a single keyword live, routing through ``eval`` in Lua mode."""
         if self.is_live_lua_mode():
             self._translate_and_eval(hyprland_config.keyword_to_lua, key, value)
         else:
             hyprland_socket.keyword(key, value)
 
-    def _apply_keyword_batch_live(self, changes: list[tuple[str, Any]]) -> list[str | None]:
+    def _send_keyword_batch(self, changes: list[tuple[str, Any]]) -> list[str | None]:
         """Apply a batch of keywords live, mirroring keyword_batch's result shape.
 
         Grouping matters for the visual result: Hyprland's PropRefresher
@@ -320,7 +320,7 @@ class HyprlandState:
             return False
         if validate:
             self._validate(key, value)
-        self._apply_keyword_live(key, value)
+        self._send_keyword(key, value)
         self._pending[key] = value
         self._notify("options", key)
         return True
@@ -345,7 +345,7 @@ class HyprlandState:
         if validate:
             for key, value in changes:
                 self._validate(key, value)
-        results = self._apply_keyword_batch_live(changes)
+        results = self._send_keyword_batch(changes)
         applied: list[tuple[str, Any]] = []
         for (key, value), error in zip(changes, results, strict=True):
             if error is None:
@@ -456,20 +456,29 @@ class HyprlandState:
         return dirty
 
     def discard(self) -> dict[str, Any]:
-        """Revert all pending changes in the compositor to on-disk values.
+        """Revert all pending changes in the compositor to saved values.
 
-        Returns a dict of key → reverted on-disk value for each key
-        that was successfully reverted.
+        For each pending key, the reverted value is the value the option
+        would have *without* the pending change — the on-disk value when
+        present, the schema default otherwise. That fully restores the
+        compositor to its pre-edit state without requiring the caller to
+        carry its own baseline.
+
+        Returns a dict of key → reverted value. Entries are ``None`` only
+        when neither the document nor the schema has any value to revert
+        to (an option with no default that was never written to disk).
         """
         reverted: dict[str, Any] = {}
         batch: list[tuple[str, Any]] = []
         for key in self._pending:
             saved = self._document.get(key)
+            if saved is None:
+                saved = self.get_default(key)
             reverted[key] = saved
             if saved is not None:
                 batch.append((key, saved))
         if batch and self._online:
-            self._apply_keyword_batch_live(batch)
+            self._send_keyword_batch(batch)
         self._pending.clear()
         for key in reverted:
             self._notify("options", key)
@@ -498,7 +507,7 @@ class HyprlandState:
         """
         if not self._online:
             return False
-        self._apply_keyword_live(key, value)
+        self._send_keyword(key, value)
         return True
 
     # -- Inspect --
@@ -689,7 +698,7 @@ def _load_schema(version: str | None) -> Mapping[str, HyprOption]:
 
 def _hint_from_schema(opt: HyprOption) -> Any:
     """Derive a type hint value from a schema option."""
-    if opt.type in _FORCE_TYPE_HINT:
+    if opt.type in _PREFER_TYPE_HINT_OVER_DEFAULT:
         return _TYPE_HINTS[opt.type]
     if opt.default is not None:
         return opt.default

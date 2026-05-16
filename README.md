@@ -68,7 +68,7 @@ state.pending()   # ["general:border_size", "decoration:rounding"]
 
 state.save()      # writes to config file and reloads compositor
 # or
-state.discard()   # reverts compositor to on-disk values
+state.discard()   # reverts compositor to saved values (on-disk, or schema default)
 ```
 
 ## Validation

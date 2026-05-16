@@ -1,140 +1,42 @@
-"""Animation tree, state, and IPC interface."""
+"""Animation state + IPC interface.
+
+The animation tree, ``HYPRLAND_NATIVE_CURVES``, and the ``AnimationData``
+parse/serialize for the ``animation =`` keyword line live in
+``hyprland-config`` — re-exported here for back-compat with existing
+consumers and because the ``Animations`` subsystem is what most callers
+reach for.
+"""
 
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Self
 
 import hyprland_socket
-
-# Curves that Hyprland recognises without a bezier= definition.
-HYPRLAND_NATIVE_CURVES = frozenset({"default", "linear"})
+from hyprland_config import (
+    ANIM_CHILDREN,
+    ANIM_FLAT,
+    ANIM_LOOKUP,
+    ANIMATION_TREE,
+    HYPRLAND_NATIVE_CURVES,
+    AnimationData,
+    get_styles_for,
+)
 
 if TYPE_CHECKING:
     from hyprland_state._state import HyprlandState
 
-# ---------------------------------------------------------------------------
-# Animation tree: (name, styles, children)
-# Children inherit parent values when not explicitly overridden.
-# ---------------------------------------------------------------------------
 
-ANIMATION_TREE = (
-    (
-        "windows",
-        ("slide", "popin", "gnomed"),
-        (
-            ("windowsIn", (), ()),
-            ("windowsOut", (), ()),
-            ("windowsMove", (), ()),
-        ),
-    ),
-    (
-        "layers",
-        ("slide", "popin", "fade"),
-        (
-            ("layersIn", (), ()),
-            ("layersOut", (), ()),
-        ),
-    ),
-    (
-        "fade",
-        (),
-        (
-            ("fadeIn", (), ()),
-            ("fadeOut", (), ()),
-            ("fadeSwitch", (), ()),
-            ("fadeShadow", (), ()),
-            ("fadeDim", (), ()),
-            (
-                "fadeLayers",
-                (),
-                (
-                    ("fadeLayersIn", (), ()),
-                    ("fadeLayersOut", (), ()),
-                ),
-            ),
-            (
-                "fadePopups",
-                (),
-                (
-                    ("fadePopupsIn", (), ()),
-                    ("fadePopupsOut", (), ()),
-                ),
-            ),
-            ("fadeDpms", (), ()),
-        ),
-    ),
-    ("border", (), ()),
-    ("borderangle", ("once", "loop"), ()),
-    (
-        "workspaces",
-        ("slide", "slidevert", "fade", "slidefade", "slidefadevert"),
-        (
-            ("workspacesIn", (), ()),
-            ("workspacesOut", (), ()),
-            (
-                "specialWorkspace",
-                (),
-                (
-                    ("specialWorkspaceIn", (), ()),
-                    ("specialWorkspaceOut", (), ()),
-                ),
-            ),
-        ),
-    ),
-    ("zoomFactor", (), ()),
-    ("monitorAdded", (), ()),
-)
-
-
-_TreeNode = tuple[str, tuple[str, ...], tuple["_TreeNode", ...]]
-_FlatEntry = tuple[str, str | None, int, tuple[str, ...]]
-
-
-def _flatten_tree(
-    tree: tuple[_TreeNode, ...], parent: str | None = None, depth: int = 0
-) -> tuple[_FlatEntry, ...]:
-    """Flatten the animation tree into an ordered tuple of (name, parent, depth, styles)."""
-    result: list[_FlatEntry] = []
-    for name, styles, children in tree:
-        result.append((name, parent, depth, styles))
-        result.extend(_flatten_tree(children, parent=name, depth=depth + 1))
-    return tuple(result)
-
-
-# Flat tree: ((name, parent_name, depth, own_styles), ...)
-ANIM_FLAT: tuple[_FlatEntry, ...] = (("global", None, 0, ()),) + _flatten_tree(
-    ANIMATION_TREE, parent="global", depth=1
-)
-
-# Lookup: name -> (parent, depth, styles)
-ANIM_LOOKUP: dict[str, tuple[str | None, int, tuple[str, ...]]] = {
-    name: (parent, depth, styles) for name, parent, depth, styles in ANIM_FLAT
-}
-
-
-# Children lookup: parent_name -> (child_names, ...)
-def _build_children(flat: tuple[_FlatEntry, ...]) -> dict[str, tuple[str, ...]]:
-    children: dict[str, list[str]] = {}
-    for name, parent, _, _ in flat:
-        if parent is not None:
-            children.setdefault(parent, []).append(name)
-    return {parent: tuple(names) for parent, names in children.items()}
-
-
-ANIM_CHILDREN: dict[str, tuple[str, ...]] = _build_children(ANIM_FLAT)
-
-
-def get_styles_for(name: str) -> tuple[str, ...]:
-    """Get available styles for an animation (inheriting from parent chain)."""
-    parent, _, styles = ANIM_LOOKUP[name]
-    if styles:
-        return styles
-    while parent and parent in ANIM_LOOKUP:
-        _, _, pstyles = ANIM_LOOKUP[parent]
-        if pstyles:
-            return pstyles
-        parent = ANIM_LOOKUP[parent][0]
-    return ()
+# Re-exports — kept in __all__ in :mod:`hyprland_state.__init__`.
+__all__ = [
+    "ANIM_CHILDREN",
+    "ANIM_FLAT",
+    "ANIM_LOOKUP",
+    "ANIMATION_TREE",
+    "HYPRLAND_NATIVE_CURVES",
+    "AnimState",
+    "Animations",
+    "get_styles_for",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -144,7 +46,13 @@ def get_styles_for(name: str) -> tuple[str, ...]:
 
 @dataclass(frozen=True, slots=True)
 class AnimState:
-    """State of a single animation."""
+    """State of a single animation.
+
+    ``overridden`` is the state-layer addition over :class:`AnimationData`:
+    it tracks whether the animation has an explicit ``animation =`` line
+    (as reported by Hyprland's IPC) or is using inherited / default values.
+    The remaining fields mirror :class:`AnimationData`'s shape.
+    """
 
     name: str
     overridden: bool = False
@@ -165,38 +73,47 @@ class AnimState:
             style=a.style,
         )
 
+    @classmethod
+    def from_keyword(cls, name: str, parts: list[str]) -> Self:
+        """Parse pre-split ``animation`` keyword fields into an AnimState.
+
+        Expected layout: ``[name, onoff, speed, curve, style?]``. A presence
+        in any config line implies the animation was overridden, so
+        ``overridden=True``. Delegates the field parsing to
+        :meth:`AnimationData.from_parts`.
+        """
+        data = AnimationData.from_parts(name, parts)
+        return cls(
+            name=data.name,
+            overridden=True,
+            enabled=data.enabled,
+            speed=data.speed,
+            curve=data.curve,
+            style=data.style,
+        )
+
+    def to_data(self) -> AnimationData:
+        """Project to the format-only :class:`AnimationData` shape."""
+        return AnimationData(
+            name=self.name,
+            enabled=self.enabled,
+            speed=self.speed,
+            curve=self.curve,
+            style=self.style,
+        )
+
+    def body(self) -> str:
+        """Render as an ``animation =`` keyword value (no keyword prefix)."""
+        return self.to_data().body()
+
+    def to_line(self) -> str:
+        """Render as a full ``animation = ...`` config line."""
+        return self.to_data().to_line()
+
 
 # ---------------------------------------------------------------------------
 # Animations interface
 # ---------------------------------------------------------------------------
-
-
-def _parse_animation_value(name: str, parts: list[str]) -> AnimState:
-    """Parse animation keyword parts into an AnimState.
-
-    Expected format: ``[name, onoff, speed, curve, style?]``.
-    """
-    enabled = parts[1] != "0" if len(parts) > 1 else True
-    speed = float(parts[2]) if len(parts) > 2 else 0.0
-    curve = parts[3] if len(parts) > 3 else "default"
-    style = parts[4] if len(parts) > 4 else ""
-    return AnimState(
-        name=name,
-        overridden=True,
-        enabled=enabled,
-        speed=speed,
-        curve=curve,
-        style=style,
-    )
-
-
-def _format_animation_kw(name: str, enabled: bool, speed: float, curve: str, style: str) -> str:
-    """Format an ``animation`` keyword value for IPC."""
-    onoff = int(enabled)
-    val = f"{name},{onoff},{speed},{curve}"
-    if style:
-        val += f",{style}"
-    return val
 
 
 class Animations:
@@ -210,8 +127,9 @@ class Animations:
 
     def __init__(self, state: "HyprlandState") -> None:
         self._state = state
-        self._cache: dict[str, AnimState] | None = None
+        self._cache: dict[str, AnimState] = {}
         self._baseline: dict[str, AnimState] = {}
+        self._synced = False
 
     # -- Read --
 
@@ -223,9 +141,8 @@ class Animations:
 
     def _ensure_cache(self) -> dict[str, AnimState]:
         """Populate the cache from IPC on first access and return it."""
-        if self._cache is None:
+        if not self._synced:
             self.sync()
-        assert self._cache is not None
         return self._cache
 
     def get_all(self) -> list[AnimState]:
@@ -282,28 +199,29 @@ class Animations:
         """
         result = self._fetch()
         if result is None:
-            if self._cache is None:
-                self._cache = {}
+            # Offline: leave the cache as-is but mark synced so we don't
+            # retry on every read. Reconnect() resets _synced.
+            self._synced = True
             return
         anims, _ = result
-        old_cache = self._cache or {}
-        self._cache = {}
+        old_cache = self._cache
+        new_cache: dict[str, AnimState] = {}
         for a in anims:
             state = AnimState.from_ipc(a)
             # Skip Hyprland-internal animations (double-underscore prefix)
             if state.name.startswith("__"):
                 continue
-            self._cache[state.name] = state
+            new_cache[state.name] = state
         # Ensure all known animations have entries
         for name in ANIM_LOOKUP:
-            if name not in self._cache:
-                self._cache[name] = AnimState(name=name)
-        # Snapshot as baseline
-        self._baseline = dict(self._cache)
+            if name not in new_cache:
+                new_cache[name] = AnimState(name=name)
+        self._cache = new_cache
+        self._baseline = dict(new_cache)
+        self._synced = True
         # Notify for changes
-        for name, state in self._cache.items():
-            old = old_cache.get(name)
-            if old is None or old != state:
+        for name, state in new_cache.items():
+            if old_cache.get(name) != state:
                 self._state._notify("animations", name)
 
     def get_baseline(self, name: str) -> AnimState | None:
@@ -333,20 +251,13 @@ class Animations:
         cache = self._ensure_cache()
         changed = [name for name in cache if cache[name] != self._baseline.get(name)]
         self._cache = dict(self._baseline)
-        batch: list[tuple[str, Any]] = []
-        for name in changed:
-            state = self._cache.get(name)
-            if state and state.overridden:
-                batch.append(
-                    (
-                        "animation",
-                        _format_animation_kw(
-                            state.name, state.enabled, state.speed, state.curve, state.style
-                        ),
-                    )
-                )
+        batch: list[tuple[str, Any]] = [
+            ("animation", state.body())
+            for name in changed
+            if (state := self._cache.get(name)) is not None and state.overridden
+        ]
         if batch and self._state.online:
-            self._state._apply_keyword_batch_live(batch)
+            self._state._send_keyword_batch(batch)
         for name in changed:
             self._state._notify("animations", name)
 
@@ -385,8 +296,10 @@ class Animations:
         if curve not in HYPRLAND_NATIVE_CURVES and curve_points:
             self.define_bezier(curve, curve_points)
 
-        value = _format_animation_kw(name, enabled, speed, curve, style)
-        self._state._apply_keyword_live("animation", value)
+        state = AnimState(
+            name=name, overridden=True, enabled=enabled, speed=speed, curve=curve, style=style
+        )
+        self._state._send_keyword("animation", state.body())
         return True
 
     def apply(
@@ -408,15 +321,14 @@ class Animations:
         """
         if not self._send_animation(name, enabled, speed, curve, style, curve_points=curve_points):
             return False
-        if self._cache is not None:
-            self._cache[name] = AnimState(
-                name=name,
-                overridden=True,
-                enabled=enabled,
-                speed=speed,
-                curve=curve,
-                style=style,
-            )
+        self._cache[name] = AnimState(
+            name=name,
+            overridden=True,
+            enabled=enabled,
+            speed=speed,
+            curve=curve,
+            style=style,
+        )
         self._state._notify("animations", name)
         return True
 
@@ -472,7 +384,7 @@ class Animations:
         if not self._state.online:
             return False
         x0, y0, x1, y1 = points
-        self._state._apply_keyword_live("bezier", f"{name},{x0},{y0},{x1},{y1}")
+        self._state._send_keyword("bezier", f"{name},{x0},{y0},{x1},{y1}")
         return True
 
     # -- Inspect --
@@ -523,11 +435,11 @@ class Animations:
         for kw in reversed(lines):
             parts = [p.strip() for p in kw.value.split(",")]
             if parts and parts[0] == name:
-                return _parse_animation_value(name, parts)
+                return AnimState.from_keyword(name, parts)
         return None
 
     @property
-    def tree(self) -> tuple[_FlatEntry, ...]:
+    def tree(self) -> tuple[tuple[str, str | None, int, tuple[str, ...]], ...]:
         """Return the flat animation tree: ``((name, parent, depth, styles), ...)``."""
         return ANIM_FLAT
 
