@@ -1,6 +1,6 @@
 """Tests for Monitors subsystem."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import ANY, MagicMock, patch
 
 import hyprland_socket
 
@@ -27,6 +27,10 @@ def _make_ipc_monitor(name="DP-1", width=1920, height=1080, refresh_rate=60.0):
     m.available_modes = ("1920x1080@60.00Hz",)
     m.transform = 0
     m.bit_depth = 8
+    m.color_management = "default"
+    m.sdr_brightness = 1.0
+    m.sdr_saturation = 1.0
+    m.description = ""
     return m
 
 
@@ -85,6 +89,7 @@ class TestApply:
 
         monitors = Monitors(mock_state)
         assert monitors.apply([MagicMock()])
+        mock_lines.assert_called_once_with(ANY, explicit_hdr_defaults=True)
         mock_state._send_keyword_batch.assert_called_once_with(
             [("monitor", "DP-1, 1920x1080@60.00Hz, 0x0, 1")]
         )

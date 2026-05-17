@@ -5,6 +5,12 @@ All notable changes to hyprland-state will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-05-17
+
+### Fixed
+
+- `Monitors.apply()` — resetting `sdrbrightness` / `sdrsaturation` back to their defaults now actually takes effect. Hyprland's `hl.monitor()` IPC is additive, so omitted SDR keys kept the previous live value; live-apply lines now emit them explicitly.
+
 ## [0.4.0] - 2026-05-16
 
 ### Added
@@ -70,6 +76,7 @@ Initial release — live state interface for Hyprland — options, animations, m
 - **Offline mode** — works without a running Hyprland instance, reads from config files and schema.
 - **Schema validation** — values validated against schema constraints (min/max, enum) before being sent to the compositor.
 
+[0.4.1]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.4.1
 [0.4.0]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.4.0
 [0.3.0]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.3.0
 [0.2.1]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.2.1

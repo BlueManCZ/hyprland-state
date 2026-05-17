@@ -110,7 +110,10 @@ class Monitors:
         """
         if not self._state.online:
             return False
-        lines = lines_from_monitors(monitors)
+        # Live-apply needs explicit SDR defaults — Hyprland's ``hl.monitor()`` is
+        # additive, so omitted ``sdrbrightness``/``sdrsaturation`` keep the
+        # previous value rather than resetting to 1.0.
+        lines = lines_from_monitors(monitors, explicit_hdr_defaults=True)
         results = self._state._send_keyword_batch([("monitor", line) for line in lines])
         ok = all(r is None for r in results)
         if ok:
