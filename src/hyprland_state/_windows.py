@@ -239,12 +239,44 @@ def revert_dispatchers_for_effect(name: str, args: str, window: Window) -> list[
       send ``1.0`` (Hyprland's compositor default), correct for the
       common single-rule case. Callers with another saved rule of the
       same effect that should still apply re-push it after this revert.
-    - Static effects (``float``, ``size``, ``workspace``, …) mutate
-      the window's actual layout state, and reverting safely requires
-      per-rule per-window history we don't track. They no-op here;
-      the escape hatch is save+reload.
+    - **Toggleable static effects** (``float`` / ``tile`` / ``pin`` /
+      ``fullscreen`` / ``maximize``) mirror their apply path: if the
+      window is currently in the rule's target state, dispatch the
+      inverse toggle. Cannot distinguish "rule put it here" from
+      "user put it here" any more than the apply path could, so the
+      fix-the-common-case trade-off is symmetric — the user's
+      just-edited rule is the most plausible cause of the current state.
+    - **Non-toggleable static effects** (``size``, ``move``,
+      ``workspace``, ``monitor``) need per-rule per-window pre-state
+      we don't track and no-op here; the escape hatch is save+reload.
     """
     addr = f"address:{window.address}"
+
+    # ── Toggleable static effects: inverse of the apply path ─────────
+
+    if name == "float":
+        return [("togglefloating", addr)] if window.floating else []
+
+    if name == "tile":
+        return [] if window.floating else [("togglefloating", addr)]
+
+    if name == "pin":
+        # ``pin`` is a toggle dispatcher, same name as the rule.
+        return [("pin", addr)] if window.pinned else []
+
+    if name == "fullscreen":
+        # Apply sent ``fullscreenstate 2 -1`` (set internal=fullscreen);
+        # revert clears the internal state when it's still fullscreen.
+        if window.fullscreen != 2:
+            return []
+        return [("fullscreenstate", f"0 -1,{addr}")]
+
+    if name == "maximize":
+        if window.fullscreen != 1:
+            return []
+        return [("fullscreenstate", f"0 -1,{addr}")]
+
+    # ── Dynamic effects ──────────────────────────────────────────────
 
     if name == "opacity":
         # Mirror the *count* of setprops the apply path emitted —

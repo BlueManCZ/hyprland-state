@@ -197,7 +197,52 @@ class TestRevertDispatchers:
         result = revert_dispatchers_for_effect("no_blur", "on", _window())
         assert result == [("setprop", "address:0xabc no_blur unset")]
 
-    def test_static_effect_revert_is_noop(self):
-        # Reverting layout changes safely requires history we don't track.
-        assert revert_dispatchers_for_effect("float", "on", _window()) == []
+    def test_float_reverts_only_when_currently_floating(self):
+        # Disabling a float rule un-floats matching windows that are
+        # currently floating; symmetric to the apply path which floats
+        # only non-floating ones. Same false-positive trade-off in
+        # reverse.
+        assert revert_dispatchers_for_effect("float", "on", _window(floating=True)) == [
+            ("togglefloating", "address:0xabc")
+        ]
+        assert revert_dispatchers_for_effect("float", "on", _window(floating=False)) == []
+
+    def test_tile_reverts_only_when_currently_tiled(self):
+        assert revert_dispatchers_for_effect("tile", "on", _window(floating=False)) == [
+            ("togglefloating", "address:0xabc")
+        ]
+        assert revert_dispatchers_for_effect("tile", "on", _window(floating=True)) == []
+
+    def test_pin_reverts_only_when_currently_pinned(self):
+        assert revert_dispatchers_for_effect("pin", "on", _window(pinned=True)) == [
+            ("pin", "address:0xabc")
+        ]
+        assert revert_dispatchers_for_effect("pin", "on", _window(pinned=False)) == []
+
+    def test_fullscreen_reverts_only_when_internally_fullscreen(self):
+        # Apply sent fullscreenstate 2 -1; revert clears internal=fullscreen.
+        # No-op when the window is in a different internal state (e.g.
+        # maximized=1 from another rule) so we don't accidentally
+        # un-maximize.
+        assert revert_dispatchers_for_effect("fullscreen", "on", _window(fullscreen=2)) == [
+            ("fullscreenstate", "0 -1,address:0xabc")
+        ]
+        assert revert_dispatchers_for_effect("fullscreen", "on", _window(fullscreen=1)) == []
+        assert revert_dispatchers_for_effect("fullscreen", "on", _window(fullscreen=0)) == []
+
+    def test_maximize_reverts_only_when_internally_maximized(self):
+        assert revert_dispatchers_for_effect("maximize", "on", _window(fullscreen=1)) == [
+            ("fullscreenstate", "0 -1,address:0xabc")
+        ]
+        assert revert_dispatchers_for_effect("maximize", "on", _window(fullscreen=2)) == []
+        assert revert_dispatchers_for_effect("maximize", "on", _window(fullscreen=0)) == []
+
+    def test_unrevertable_static_effects_stay_noop(self):
+        # ``size`` / ``move`` / ``workspace`` / ``monitor`` mutate state
+        # without a per-window inverse we can compute from current state
+        # alone (no "previous size" tracking). Save+reload is the escape
+        # hatch.
         assert revert_dispatchers_for_effect("size", "100 100", _window()) == []
+        assert revert_dispatchers_for_effect("move", "0 0", _window()) == []
+        assert revert_dispatchers_for_effect("workspace", "2", _window()) == []
+        assert revert_dispatchers_for_effect("monitor", "DP-1", _window()) == []

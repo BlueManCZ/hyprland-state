@@ -5,6 +5,12 @@ All notable changes to hyprland-state will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-05-20
+
+### Changed
+
+- `revert_dispatchers_for_effect()` now handles toggleable static effects (`float`, `tile`, `pin`, `fullscreen`, `maximize`) — applies the inverse toggle when the window matches the rule's target state, mirroring the apply path's behavior.
+
 ## [0.4.1] - 2026-05-17
 
 ### Fixed
@@ -76,6 +82,7 @@ Initial release — live state interface for Hyprland — options, animations, m
 - **Offline mode** — works without a running Hyprland instance, reads from config files and schema.
 - **Schema validation** — values validated against schema constraints (min/max, enum) before being sent to the compositor.
 
+[0.4.2]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.4.2
 [0.4.1]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.4.1
 [0.4.0]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.4.0
 [0.3.0]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.3.0
