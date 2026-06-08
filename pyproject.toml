@@ -17,9 +17,9 @@ classifiers = [
 ]
 dependencies = [
     "hyprland-config>=0.6.1",
-    "hyprland-monitors>=0.6.0",
+    "hyprland-monitors>=0.6.1",
     "hyprland-schema>=0.6.0",
-    "hyprland-socket>=0.12.1",
+    "hyprland-socket>=0.12.2",
 ]
 
 [project.urls]

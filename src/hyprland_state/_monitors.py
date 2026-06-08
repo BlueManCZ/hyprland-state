@@ -104,18 +104,32 @@ class Monitors:
 
         Generates ``monitor = ...`` keyword lines from the monitor states
         and applies them via IPC batch. Updates the cache on success.
-
-        Returns ``True`` if all commands succeeded, ``False`` if offline
-        or any command was rejected.
         """
         if not self._state.online:
             return False
-        # Live-apply needs explicit SDR defaults — Hyprland's ``hl.monitor()`` is
-        # additive, so omitted ``sdrbrightness``/``sdrsaturation`` keep the
-        # previous value rather than resetting to 1.0.
+
+        # 1. Detect if the compositor is running the modern Lua ecosystem
+        try:
+            status = self._state._ipc_get(hyprland_socket.get_status, default={})
+            is_lua_backend = status.get("configProvider") == "lua"
+        except Exception:
+            is_lua_backend = False
+
+        if is_lua_backend:
+            for mon in monitors:
+                if not getattr(mon, "disabled", False):
+                    try:
+                        # Use the low-level socket transmitter to bypass text parsing entirely
+                        hyprland_socket._socket._send(
+                            f'dispatch hl.monitor({{ output = "{mon.name}", disabled = false }})'
+                        )
+                    except Exception:
+                        pass
+
         lines = lines_from_monitors(monitors, explicit_hdr_defaults=True)
         results = self._state._send_keyword_batch([("monitor", line) for line in lines])
         ok = all(r is None for r in results)
+
         if ok:
             self._cache = sorted([copy(m) for m in monitors], key=lambda m: m.name)
             self._state._notify("monitors", None)
@@ -130,7 +144,17 @@ class Monitors:
         if not self._state.online:
             return False
         try:
-            self._state._send_keyword("monitor", f"{name}, disable")
+            status = self._state._ipc_get(hyprland_socket.get_status, default={})
+            is_lua_backend = status.get("configProvider") == "lua"
+
+            if is_lua_backend:
+                # Explicitly tear down via native Lua execution
+                hyprland_socket._socket._send(
+                    f'dispatch hl.monitor({{ output = "{name}", disabled = true }})'
+                )
+            else:
+                # Legacy configuration fallback for hyprland versions <= 0.54
+                self._state._send_keyword("monitor", f"{name}, disable")
             return True
         except hyprland_socket.HyprlandError:
             return False
