@@ -606,6 +606,10 @@ class HyprlandState:
                 return True
         return False
 
+    def has_touchscreen(self) -> bool:
+        """Check if any touchscreen device is connected."""
+        return bool(self.get_devices().get("touch"))
+
     # -- Internal helpers --
 
     def _ipc_get[T](self, fn: Callable[..., T], *args: Any, default: T) -> T:

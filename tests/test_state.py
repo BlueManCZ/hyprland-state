@@ -416,6 +416,27 @@ class TestDevices:
         state = HyprlandState(tmp_config, schema=None)
         assert state.has_touchpad() is True
 
+    def test_has_touchscreen_offline(self, offline_state):
+        assert offline_state.has_touchscreen() is False
+
+    def test_has_touchscreen_true(self, online_mocks, tmp_config):
+        mock_socket, _ = online_mocks
+        mock_socket.get_devices.return_value = {
+            "touch": [{"name": "ELAN Touchscreen"}],
+        }
+
+        state = HyprlandState(tmp_config, schema=None)
+        assert state.has_touchscreen() is True
+
+    def test_has_touchscreen_false(self, online_mocks, tmp_config):
+        mock_socket, _ = online_mocks
+        mock_socket.get_devices.return_value = {
+            "mice": [{"name": "Logitech USB Mouse"}],
+        }
+
+        state = HyprlandState(tmp_config, schema=None)
+        assert state.has_touchscreen() is False
+
 
 class TestReconnect:
     def test_reconnect_from_offline(self, offline_state):

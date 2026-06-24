@@ -5,6 +5,12 @@ All notable changes to hyprland-state will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] - 2026-06-24
+
+### Added
+
+- `HyprlandState.has_touchscreen()` — mirrors `has_touchpad()` for touchscreen hardware, reporting whether the running compositor lists any `touch` device. Lets callers gate touchscreen-only settings (e.g. workspace-swipe touch gestures) the same way touchpad settings are gated.
+
 ## [0.4.2] - 2026-05-20
 
 ### Changed
@@ -82,6 +88,7 @@ Initial release — live state interface for Hyprland — options, animations, m
 - **Offline mode** — works without a running Hyprland instance, reads from config files and schema.
 - **Schema validation** — values validated against schema constraints (min/max, enum) before being sent to the compositor.
 
+[0.4.3]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.4.3
 [0.4.2]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.4.2
 [0.4.1]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.4.1
 [0.4.0]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.4.0
