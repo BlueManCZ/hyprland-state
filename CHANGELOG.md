@@ -5,6 +5,12 @@ All notable changes to hyprland-state will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4] - 2026-07-30
+
+### Fixed
+
+- `save()` no longer overwrites Lua configs with Hyprlang content. The bug was in `Document.save()` (hyprland-config), which always emitted `.conf` syntax, so a `hyprland.lua` saved through `HyprlandState` came back as a config Hyprland refuses to parse. Requires hyprland-config 0.9.14, and the floor now enforces it. https://github.com/BlueManCZ/hyprland-state/issues/2
+
 ## [0.4.3] - 2026-06-24
 
 ### Added
@@ -88,6 +94,7 @@ Initial release — live state interface for Hyprland — options, animations, m
 - **Offline mode** — works without a running Hyprland instance, reads from config files and schema.
 - **Schema validation** — values validated against schema constraints (min/max, enum) before being sent to the compositor.
 
+[0.4.4]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.4.4
 [0.4.3]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.4.3
 [0.4.2]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.4.2
 [0.4.1]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.4.1
