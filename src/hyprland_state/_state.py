@@ -313,11 +313,16 @@ class HyprlandState:
         against schema constraints (min/max, enum) before sending to
         the compositor. Set to ``False`` to bypass validation.
 
+        A ``choice`` option takes either its integer value or the matching
+        name from ``enum_values``; names are converted to the integer
+        before being sent.
+
         Returns ``True`` on success.
         Raises ``ValueError`` if validation fails.
         """
         if not self._online:
             return False
+        value = self._coerce_choice(key, value)
         if validate:
             self._validate(key, value)
         self._send_keyword(key, value)
@@ -342,6 +347,7 @@ class HyprlandState:
         """
         if not self._online:
             return []
+        changes = [(key, self._coerce_choice(key, value)) for key, value in changes]
         if validate:
             for key, value in changes:
                 self._validate(key, value)
@@ -666,6 +672,20 @@ class HyprlandState:
         return extract_ipc_value(data, hint)
 
     # -- Validation --
+
+    def _coerce_choice(self, key: str, value: Any) -> Any:
+        """Replace a choice option's name with the integer Hyprland stores.
+
+        Only the Lua parser accepts the name; the index works in both config
+        modes, is what IPC reads back, and is what the on-disk config needs
+        once ``save()`` writes the value out.
+        """
+        info = self.inspect(key)
+        if info is None or info.type != "choice" or not info.enum_values:
+            return value
+        if isinstance(value, str) and value in info.enum_values:
+            return info.enum_values.index(value)
+        return value
 
     def _validate(self, key: str, value: Any) -> None:
         """Check *value* against schema constraints for *key*.

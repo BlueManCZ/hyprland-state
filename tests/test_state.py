@@ -290,6 +290,59 @@ class TestValidation:
             state.apply("misc:mode", "z")
 
 
+class TestChoiceOptions:
+    @staticmethod
+    def _state(tmp_config) -> HyprlandState:
+        opt = _make_schema_opt(
+            key="general:resize_corner",
+            type="choice",
+            default=0,
+            min=None,
+            max=None,
+            enum_values=("disable", "top_left", "top_right", "bottom_right", "bottom_left"),
+        )
+        return HyprlandState(tmp_config, schema={"general:resize_corner": opt})
+
+    def test_apply_accepts_index(self, online_mocks, tmp_config):
+        mock_socket, _ = online_mocks
+        state = self._state(tmp_config)
+
+        assert state.apply("general:resize_corner", 2) is True
+        mock_socket.keyword.assert_called_once_with("general:resize_corner", 2)
+
+    def test_apply_converts_name_to_index(self, online_mocks, tmp_config):
+        mock_socket, _ = online_mocks
+        state = self._state(tmp_config)
+
+        assert state.apply("general:resize_corner", "top_right") is True
+        mock_socket.keyword.assert_called_once_with("general:resize_corner", 2)
+
+    def test_apply_batch_converts_name_to_index(self, online_mocks, tmp_config):
+        mock_socket, _ = online_mocks
+        mock_socket.keyword_batch.return_value = [None]
+        state = self._state(tmp_config)
+
+        applied = state.apply_batch([("general:resize_corner", "bottom_left")])
+        assert applied == [("general:resize_corner", 4)]
+        mock_socket.keyword_batch.assert_called_once_with([("general:resize_corner", 4)])
+
+    def test_apply_rejects_unknown_name(self, online_mocks, tmp_config):
+        mock_socket, _ = online_mocks
+        state = self._state(tmp_config)
+
+        with pytest.raises(ValueError, match="not one of"):
+            state.apply("general:resize_corner", "sideways")
+        mock_socket.keyword.assert_not_called()
+
+    def test_apply_rejects_out_of_range_index(self, online_mocks, tmp_config):
+        mock_socket, _ = online_mocks
+        state = self._state(tmp_config)
+
+        with pytest.raises(ValueError, match="not one of"):
+            state.apply("general:resize_corner", 9)
+        mock_socket.keyword.assert_not_called()
+
+
 class TestOnlineWithMocks:
     def test_apply_calls_keyword(self, online_mocks, tmp_config):
         mock_socket, _ = online_mocks

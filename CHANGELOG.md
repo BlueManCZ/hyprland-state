@@ -5,6 +5,13 @@ All notable changes to hyprland-state will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.5] - 2026-07-31
+
+### Fixed
+
+- `apply()` and `apply_batch()` no longer reject valid `choice` values. Both the integer Hyprland stores (`apply("general:resize_corner", 2)`) and the name from `enum_values` (`apply("general:resize_corner", "top_right")`) were refused by the schema validator; the fix lands in hyprland-schema 0.7.1, and the floor now enforces it. Names are converted to their index before being sent, so the value reaches the compositor in the form both config modes accept and matches what IPC reads back. https://github.com/BlueManCZ/hyprland-state/issues/4
+- The schema behind `inspect()`, `get_default()` and validation now matches the running compositor. `hyprctl` reports the version as `0.55.4` while hyprland-schema keys its bundled versions on the git tag `v0.55.4`, so the lookup missed, tried a doomed download, and fell back to the bundled latest — meaning options and types from a Hyprland release the user is not running. Also fixed in hyprland-schema 0.7.1.
+
 ## [0.4.4] - 2026-07-30
 
 ### Fixed
@@ -94,6 +101,7 @@ Initial release — live state interface for Hyprland — options, animations, m
 - **Offline mode** — works without a running Hyprland instance, reads from config files and schema.
 - **Schema validation** — values validated against schema constraints (min/max, enum) before being sent to the compositor.
 
+[0.4.5]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.4.5
 [0.4.4]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.4.4
 [0.4.3]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.4.3
 [0.4.2]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.4.2
