@@ -89,7 +89,7 @@ class TestApply:
 
         monitors = Monitors(mock_state)
         assert monitors.apply([MagicMock()])
-        mock_lines.assert_called_once_with(ANY, explicit_hdr_defaults=True)
+        mock_lines.assert_called_once_with(ANY, for_live_apply=True)
         mock_state._send_keyword_batch.assert_called_once_with(
             [("monitor", "DP-1, 1920x1080@60.00Hz, 0x0, 1")]
         )

@@ -5,6 +5,12 @@ All notable changes to hyprland-state will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.6] - 2026-08-08
+
+### Fixed
+
+- `monitors.apply()` now resets a monitor's transform, bit depth and colour-management preset when the override is cleared. In Lua mode the monitor keyword is translated to `hl.monitor()`, which seeds the rule from the existing one for that output, so an omitted key kept its old value: setting a rotated monitor back to Normal had no effect until the next config reload. Requires hyprland-monitors 0.9.0, and the floor now enforces it. https://github.com/BlueManCZ/hyprmod/issues/82
+
 ## [0.4.5] - 2026-07-31
 
 ### Fixed
@@ -101,6 +107,7 @@ Initial release — live state interface for Hyprland — options, animations, m
 - **Offline mode** — works without a running Hyprland instance, reads from config files and schema.
 - **Schema validation** — values validated against schema constraints (min/max, enum) before being sent to the compositor.
 
+[0.4.6]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.4.6
 [0.4.5]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.4.5
 [0.4.4]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.4.4
 [0.4.3]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.4.3

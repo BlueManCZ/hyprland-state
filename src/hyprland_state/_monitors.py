@@ -110,10 +110,11 @@ class Monitors:
         """
         if not self._state.online:
             return False
-        # Live-apply needs explicit SDR defaults — Hyprland's ``hl.monitor()`` is
-        # additive, so omitted ``sdrbrightness``/``sdrsaturation`` keep the
-        # previous value rather than resetting to 1.0.
-        lines = lines_from_monitors(monitors, explicit_hdr_defaults=True)
+        # Hyprland's ``hl.monitor()`` is additive, so omitted keys keep their
+        # previous value rather than resetting to the default. ``for_live_apply``
+        # emits the defaults explicitly (``transform, 0``, SDR brightness and
+        # saturation) so clearing an override actually takes effect.
+        lines = lines_from_monitors(monitors, for_live_apply=True)
         results = self._state._send_keyword_batch([("monitor", line) for line in lines])
         ok = all(r is None for r in results)
         if ok:
