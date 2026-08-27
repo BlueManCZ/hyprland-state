@@ -1,6 +1,6 @@
 [project]
 name = "hyprland-state"
-version = "0.4.6"
+version = "0.4.7"
 description = "Live state interface for Hyprland — options, animations, monitors, binds, and devices"
 requires-python = ">=3.12"
 license = "MIT"

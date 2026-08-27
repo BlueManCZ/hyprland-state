@@ -1,10 +1,16 @@
 """Per-window retroactive dispatch for Hyprland window rules.
 
-Hyprland resolves windowrules to per-window state at map time and never
-re-evaluates them when a new rule arrives via IPC. The helpers here
-close that gap by translating an effect into the ``hyprctl dispatch``
-calls that bring an already-mapped window into the rule's target state —
-and the symmetric calls that revert it.
+Hyprland resolves windowrules to per-window state at map time. A rule
+that arrives afterwards reaches the windows already on screen only
+part-way: on 0.55+ in Lua mode, ``hl.window_rule`` schedules a window-
+state refresh that re-resolves the dynamic half (opacity, blur,
+rounding, …), while the Hyprlang ``keyword`` path schedules nothing and
+the static half (float, workspace, size, …) is a map-time decision
+either way. The helpers here close whichever part of the gap is left,
+translating an effect into the ``hyprctl dispatch`` calls that bring an
+already-mapped window into the rule's target state, and the symmetric
+calls that revert it. Callers say which gap they have via
+``compositor_reapplies_dynamic``.
 
 The module deliberately knows nothing about *which* windows a rule
 applies to (that's matcher logic, owned by callers): it operates on an
@@ -27,6 +33,8 @@ The constants exposed for fast-path predicates:
 - :data:`RETROACTIVE_EFFECTS` — every effect for which apply emits at
   least one dispatcher. Use to skip the ``get_windows`` IPC call when
   none of an outgoing rule's effects could mutate existing windows.
+- :data:`STATIC_RETROACTIVE_EFFECTS` — the subset that still needs us
+  under ``compositor_reapplies_dynamic``.
 """
 
 from hyprland_socket import Window
@@ -61,19 +69,32 @@ SETPROP_PASSTHROUGH_EFFECTS: frozenset[str] = frozenset(
 )  # fmt: skip
 
 
+# Effects Hyprland resolves when a window maps and never revisits, in
+# any config mode. Replicating one means mutating the window itself
+# (``togglefloating``, ``movetoworkspacesilent``, …), so these need a
+# retroactive dispatch even where the compositor re-resolves the
+# dynamic half on its own.
+STATIC_RETROACTIVE_EFFECTS: frozenset[str] = frozenset(
+    {
+        "float", "tile", "pin",
+        "fullscreen", "maximize",
+        "workspace", "monitor",
+        "size", "move",
+    }
+)  # fmt: skip
+
+
 # Effect names whose at-spawn / per-frame behaviour we replicate on
 # existing windows. Used as a fast-path predicate so effects without
 # a runtime mutation (``no_initial_focus``, ``center``,
 # ``suppress_event``, plugin effects) skip the IPC ``get_windows``
 # round-trip when nothing in a rule could possibly mutate existing
-# windows.
+# windows. Callers passing ``compositor_reapplies_dynamic`` want
+# :data:`STATIC_RETROACTIVE_EFFECTS` for that predicate instead: the
+# dynamic names below emit nothing for them.
 RETROACTIVE_EFFECTS: frozenset[str] = frozenset(
     {
-        # Static effects with mutating dispatchers.
-        "float", "tile", "pin",
-        "fullscreen", "maximize",
-        "workspace", "monitor",
-        "size", "move",
+        *STATIC_RETROACTIVE_EFFECTS,
         # Dynamic effects with multi-value setprop translations.
         "opacity", "border_color",
         # Dynamic effects whose v3 name is the setprop name verbatim.
@@ -85,17 +106,26 @@ RETROACTIVE_EFFECTS: frozenset[str] = frozenset(
 def _setprop(window: Window, prop: str, value: str) -> tuple[str, str]:
     """Build a ``setprop`` dispatcher tuple for *window*.
 
-    Hyprland 0.54+ overrides setprop values at ``PRIORITY_SET_PROP``
+    Hyprland 0.54+ stores setprop values at ``PRIORITY_SET_PROP``
     internally, so they persist without a ``lock`` flag — and 0.54
     actively ignores the flag (its ``CVarList`` parser stops at the
-    third token). The next config reload re-resolves rules from the
-    document and clears the override, so save+reload still produces
-    the canonical state.
+    third token).
+
+    That priority sits *above* the ``PRIORITY_WINDOW_RULE`` a rule
+    resolves to, and a config reload does not clear it (verified
+    against 0.56.1: a window set to ``opacity 0.3`` was still 0.3
+    after ``hyprctl reload``). The override therefore outlives the
+    rule that prompted it, for as long as the window is open, and
+    only an explicit revert takes it back off. Pass
+    ``compositor_reapplies_dynamic`` wherever Hyprland maintains the
+    value itself, rather than pinning it here.
     """
     return ("setprop", f"address:{window.address} {prop} {value}")
 
 
-def dispatchers_for_effect(name: str, args: str, window: Window) -> list[tuple[str, str]]:
+def dispatchers_for_effect(
+    name: str, args: str, window: Window, *, compositor_reapplies_dynamic: bool = False
+) -> list[tuple[str, str]]:
     """Dispatchers that retroactively apply *name args* to *window*.
 
     Returns ``[(dispatcher, arg), …]`` for any effect we can mirror on
@@ -104,13 +134,19 @@ def dispatchers_for_effect(name: str, args: str, window: Window) -> list[tuple[s
     - **Static effects** (``float``, ``size``, ``workspace``, …) →
       mutating dispatchers (``togglefloating``, ``resizewindowpixel``,
       ``movetoworkspacesilent``, …). All gated by current state where
-      a toggle would otherwise undo itself.
+      a toggle would otherwise undo itself. These are a map-time
+      decision in every config mode, so they always need us.
     - **Dynamic effects** (``opacity``, ``no_blur``, ``rounding``,
-      ``border_color``, …) → ``setprop``. Hyprland resolves dynamic
-      windowrules to per-window state at map time, so a fresh
-      ``keyword windowrule = …, opacity 0.5`` doesn't update existing
-      windows on its own — we need the explicit ``setprop`` to mutate
-      each match.
+      ``border_color``, …) → ``setprop``, unless
+      *compositor_reapplies_dynamic* says the compositor keeps them up
+      to date on its own.
+
+    Set *compositor_reapplies_dynamic* when the rule reaches Hyprland
+    through the Lua config API on 0.55+: ``hl.window_rule`` schedules a
+    window-state refresh, which re-resolves every mapped window against
+    the rule list, so the dynamic half lands without us. The Hyprlang
+    ``keyword windowrule`` path schedules nothing, which is why the
+    default is to emit the props.
 
     Returns an empty list for effects with no useful retroactive
     operation (``center``, ``no_initial_focus``) or idempotent cases
@@ -176,6 +212,13 @@ def dispatchers_for_effect(name: str, args: str, window: Window) -> list[tuple[s
         return [("movewindowpixel", f"exact {x} {y},{addr}")]
 
     # ── Dynamic effects: setprop ──────────────────────────────────
+    #
+    # Everything below pins a value at PRIORITY_SET_PROP. When the
+    # compositor already re-resolves these, pinning would outrank the
+    # rule and survive both later edits and reloads (see _setprop).
+
+    if compositor_reapplies_dynamic:
+        return []
 
     if name == "opacity":
         # Hyprland's ``setprop opacity`` (and the ``_inactive`` /
@@ -221,11 +264,18 @@ def dispatchers_for_effect(name: str, args: str, window: Window) -> list[tuple[s
     return []
 
 
-def revert_dispatchers_for_effect(name: str, args: str, window: Window) -> list[tuple[str, str]]:
+def revert_dispatchers_for_effect(
+    name: str, args: str, window: Window, *, compositor_reapplies_dynamic: bool = False
+) -> list[tuple[str, str]]:
     """Dispatchers that revert *name args* on *window*.
 
-    Symmetric to :func:`dispatchers_for_effect`. Behaviour splits by
-    which Hyprland 0.54.3 setprop branch the property uses:
+    Symmetric to :func:`dispatchers_for_effect`, including
+    *compositor_reapplies_dynamic*: with no prop of ours on the window
+    there is nothing to clear, and what the window shows comes from the
+    rule list, which only a config reload can shrink.
+
+    Behaviour otherwise splits by which Hyprland 0.54.3 setprop branch
+    the property uses:
 
     - Properties that flow through ``parsePropTrivial`` (every bool
       effect, plus ``rounding``, ``border_size``, ``rounding_power``,
@@ -277,6 +327,9 @@ def revert_dispatchers_for_effect(name: str, args: str, window: Window) -> list[
         return [("fullscreenstate", f"0 -1,{addr}")]
 
     # ── Dynamic effects ──────────────────────────────────────────────
+
+    if compositor_reapplies_dynamic:
+        return []
 
     if name == "opacity":
         # Mirror the *count* of setprops the apply path emitted —

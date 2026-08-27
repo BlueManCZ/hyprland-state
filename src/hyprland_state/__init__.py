@@ -15,6 +15,7 @@ from hyprland_state._state import HyprlandState
 from hyprland_state._windows import (
     RETROACTIVE_EFFECTS,
     SETPROP_PASSTHROUGH_EFFECTS,
+    STATIC_RETROACTIVE_EFFECTS,
     dispatchers_for_effect,
     revert_dispatchers_for_effect,
 )
@@ -31,6 +32,7 @@ __all__ = [
     "Monitors",
     "RETROACTIVE_EFFECTS",
     "SETPROP_PASSTHROUGH_EFFECTS",
+    "STATIC_RETROACTIVE_EFFECTS",
     "dispatchers_for_effect",
     "get_styles_for",
     "revert_dispatchers_for_effect",

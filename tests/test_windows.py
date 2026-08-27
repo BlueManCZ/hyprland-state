@@ -7,6 +7,7 @@ import pytest
 from hyprland_state import (
     RETROACTIVE_EFFECTS,
     SETPROP_PASSTHROUGH_EFFECTS,
+    STATIC_RETROACTIVE_EFFECTS,
     dispatchers_for_effect,
     revert_dispatchers_for_effect,
 )
@@ -26,6 +27,25 @@ def _window(
     win.pinned = pinned
     win.fullscreen = fullscreen
     return win
+
+
+# Args that make an effect emit something, for the catalog sweeps below.
+# Anything not listed is a bool and takes "on".
+_EFFECT_ARGS = {
+    "workspace": "2",
+    "monitor": "DP-1",
+    "size": "800 600",
+    "move": "100 200",
+    "opacity": "0.5",
+    "border_color": "rgb(ff0000)",
+    "border_size": "2",
+    "rounding": "8",
+    "rounding_power": "2",
+    "animation": "popin",
+    "idle_inhibit": "focus",
+    "scroll_mouse": "1.0",
+    "scroll_touchpad": "1.0",
+}
 
 
 class TestRetroactiveCatalogs:
@@ -56,6 +76,20 @@ class TestRetroactiveCatalogs:
         # be in the set — callers rely on this to skip get_windows IPC.
         for name in ("center", "no_initial_focus", "suppress_event", "tag"):
             assert name not in RETROACTIVE_EFFECTS
+
+    def test_static_catalog_is_what_survives_the_compositor_reapplying(self):
+        # The predicate callers use in Lua mode has to agree with what the
+        # apply path actually emits there, or they skip the window walk for
+        # a rule that needed it (or pay for one that dispatches nothing).
+        win = _window(floating=True, pinned=True, fullscreen=2)
+        for name in sorted(RETROACTIVE_EFFECTS):
+            args = _EFFECT_ARGS.get(name, "on")
+            reapplied = dispatchers_for_effect(name, args, win, compositor_reapplies_dynamic=True)
+            assert not any(d[0] == "setprop" for d in reapplied), name
+            if name in STATIC_RETROACTIVE_EFFECTS:
+                assert reapplied == dispatchers_for_effect(name, args, win), name
+            else:
+                assert reapplied == [], name
 
 
 class TestApplyDispatchers:
@@ -246,3 +280,58 @@ class TestRevertDispatchers:
         assert revert_dispatchers_for_effect("move", "0 0", _window()) == []
         assert revert_dispatchers_for_effect("workspace", "2", _window()) == []
         assert revert_dispatchers_for_effect("monitor", "DP-1", _window()) == []
+
+
+class TestCompositorReappliesDynamic:
+    """The Lua-mode switch: Hyprland re-resolves dynamic effects itself.
+
+    A ``setprop`` lands at ``PRIORITY_SET_PROP``, above the rule's own
+    ``PRIORITY_WINDOW_RULE``, and a config reload does not clear it. Where
+    the compositor keeps the value current, pinning it here would outlive
+    the rule that prompted it.
+    """
+
+    def test_off_by_default(self):
+        # The Hyprlang keyword path schedules no refresh, so the props are
+        # still the only way those effects reach an open window.
+        assert dispatchers_for_effect("opacity", "0.5", _window()) == [
+            ("setprop", "address:0xabc opacity 0.5"),
+            ("setprop", "address:0xabc opacity_inactive 0.5"),
+        ]
+
+    def test_apply_drops_the_props(self):
+        assert (
+            dispatchers_for_effect("opacity", "0.5", _window(), compositor_reapplies_dynamic=True)
+            == []
+        )
+        assert (
+            dispatchers_for_effect("no_blur", "on", _window(), compositor_reapplies_dynamic=True)
+            == []
+        )
+
+    def test_apply_keeps_the_static_half(self):
+        assert dispatchers_for_effect(
+            "float", "on", _window(floating=False), compositor_reapplies_dynamic=True
+        ) == [("togglefloating", "address:0xabc")]
+
+    def test_revert_drops_the_unsets(self):
+        # Nothing of ours is on the window, so there is no override to
+        # clear; what shows comes from the rule list, and only a config
+        # reload shrinks that.
+        assert (
+            revert_dispatchers_for_effect(
+                "opacity", "0.5", _window(), compositor_reapplies_dynamic=True
+            )
+            == []
+        )
+        assert (
+            revert_dispatchers_for_effect(
+                "border_color", "rgb(ff0000)", _window(), compositor_reapplies_dynamic=True
+            )
+            == []
+        )
+
+    def test_revert_keeps_the_inverse_toggles(self):
+        assert revert_dispatchers_for_effect(
+            "float", "on", _window(floating=True), compositor_reapplies_dynamic=True
+        ) == [("togglefloating", "address:0xabc")]

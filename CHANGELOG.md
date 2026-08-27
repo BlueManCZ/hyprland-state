@@ -5,6 +5,17 @@ All notable changes to hyprland-state will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.7] - 2026-08-27
+
+### Added
+
+- `dispatchers_for_effect()` and `revert_dispatchers_for_effect()` take `compositor_reapplies_dynamic`, which drops the `setprop` half of the result. Hyprland 0.55+ in Lua mode schedules a window-state refresh from `hl.window_rule`, re-resolving every mapped window against the rule list, so a caller that registers the rule there gets the dynamic effects (opacity, blur, rounding, border colour) applied without asking for them per window. The Hyprlang `keyword` path schedules nothing, so the default stays off. https://github.com/BlueManCZ/hyprmod/issues/79
+- `STATIC_RETROACTIVE_EFFECTS` — the subset of `RETROACTIVE_EFFECTS` that still needs a per-window dispatch under `compositor_reapplies_dynamic`. Callers use it as the fast-path predicate in that mode, so a rule of purely dynamic effects skips the `get_windows` round-trip instead of walking the window list to dispatch nothing.
+
+### Fixed
+
+- `_setprop`'s documented premise was wrong, and the docs for both dispatch helpers with it. A `setprop` is stored at `PRIORITY_SET_PROP`, above the `PRIORITY_WINDOW_RULE` a rule resolves to, and a config reload does **not** clear it: verified against Hyprland 0.56.1, a window set to `opacity 0.3` was still 0.3 after `hyprctl reload`. The override outlives the rule that prompted it for as long as the window is open, so a caller that applied one and later edited the effect away had no way back to the rule's value. Behaviour is unchanged for callers that don't pass the new flag; what changes is that the trade-off is now stated accurately.
+
 ## [0.4.6] - 2026-08-08
 
 ### Fixed
@@ -107,6 +118,7 @@ Initial release — live state interface for Hyprland — options, animations, m
 - **Offline mode** — works without a running Hyprland instance, reads from config files and schema.
 - **Schema validation** — values validated against schema constraints (min/max, enum) before being sent to the compositor.
 
+[0.4.7]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.4.7
 [0.4.6]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.4.6
 [0.4.5]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.4.5
 [0.4.4]: https://github.com/BlueManCZ/hyprland-state/releases/tag/v0.4.4
