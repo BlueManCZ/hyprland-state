@@ -5,6 +5,13 @@ All notable changes to hyprland-state will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.8] - 2026-11-14
+
+### Fixed
+
+- `has_touchpad()` now finds touchpads that Hyprland lists under a hardware ID. Built-in I2C/SMBus touchpads can be named by their ID alone (`pnp0c50:0b-0911:5288`), with no "touchpad" or "trackpad" in the name for the old check to find, so hyprmod greyed out the touchpad settings and hid the Gestures page on laptops where the touchpad worked. `hyprctl devices` carries no touchpad flag, so when no name settles it the check falls back to udev's `ID_INPUT_TOUCHPAD` for the devices Hyprland reports. A touchpad Hyprland does not manage still does not make a plain mouse count as one. https://github.com/BlueManCZ/hyprland-state/pull/5
+- The udev fallback also matches a touchpad Hyprland renamed with a `-N` suffix because another device already held its name (`pnp0c50:0b-0911:5288-1`).
+
 ## [0.4.7] - 2026-08-27
 
 ### Added
