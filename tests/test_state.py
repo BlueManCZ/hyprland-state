@@ -436,6 +436,12 @@ class TestMonitorsProperty:
 
 
 class TestDevices:
+    @pytest.fixture(autouse=True)
+    def udev_touchpads(self):
+        """Keep the host's real udev database out of these tests."""
+        with patch("hyprland_state._devices.udev_touchpad_names", return_value=set()) as lookup:
+            yield lookup
+
     def test_get_devices_offline(self, offline_state):
         assert offline_state.get_devices() == {}
 
@@ -469,33 +475,37 @@ class TestDevices:
         state = HyprlandState(tmp_config, schema=None)
         assert state.has_touchpad() is True
 
-    def test_has_touchpad_udev_hardware_id(self, online_mocks, tmp_config):
+    def test_has_touchpad_udev_hardware_id(self, online_mocks, tmp_config, udev_touchpads):
         """I2C touchpads are named by hardware ID, so udev has to identify them."""
         mock_socket, _ = online_mocks
         mock_socket.get_devices.return_value = {
             "mice": [{"name": "pnp0c50:0b-0911:5288"}],
         }
+        udev_touchpads.return_value = {"pnp0c50:0b 0911:5288"}
 
-        with patch(
-            "hyprland_state._state._udev_touchpad_names",
-            return_value={"pnp0c50:0b 0911:5288"},
-        ):
-            state = HyprlandState(tmp_config, schema=None)
-            assert state.has_touchpad() is True
+        state = HyprlandState(tmp_config, schema=None)
+        assert state.has_touchpad() is True
 
-    def test_has_touchpad_ignores_unrelated_udev_touchpad(self, online_mocks, tmp_config):
+    def test_has_touchpad_ignores_unrelated_udev_touchpad(
+        self, online_mocks, tmp_config, udev_touchpads
+    ):
         """A udev touchpad only counts when it is one of the reported mice."""
         mock_socket, _ = online_mocks
         mock_socket.get_devices.return_value = {
             "mice": [{"name": "Logitech USB Mouse"}],
         }
+        udev_touchpads.return_value = {"pnp0c50:0b 0911:5288"}
 
-        with patch(
-            "hyprland_state._state._udev_touchpad_names",
-            return_value={"pnp0c50:0b 0911:5288"},
-        ):
-            state = HyprlandState(tmp_config, schema=None)
-            assert state.has_touchpad() is False
+        state = HyprlandState(tmp_config, schema=None)
+        assert state.has_touchpad() is False
+
+    def test_has_touchpad_tolerates_missing_name(self, online_mocks, tmp_config, udev_touchpads):
+        mock_socket, _ = online_mocks
+        mock_socket.get_devices.return_value = {"mice": [{"address": "0x1"}]}
+        udev_touchpads.return_value = {"pnp0c50:0b 0911:5288"}
+
+        state = HyprlandState(tmp_config, schema=None)
+        assert state.has_touchpad() is False
 
     def test_has_touchscreen_offline(self, offline_state):
         assert offline_state.has_touchscreen() is False
