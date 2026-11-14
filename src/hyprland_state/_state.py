@@ -16,6 +16,51 @@ from hyprland_state._monitors import Monitors
 
 _UNSET = object()
 
+
+def _normalize_device_name(name: str) -> str:
+    """Fold the differences between kernel and Hyprland device names.
+
+    Hyprland lowercases device names and replaces spaces with dashes, so an
+    I2C touchpad reported by the kernel as ``PNP0C50:0b 0911:5288`` shows up as
+    ``pnp0c50:0b-0911:5288``. Treat whitespace and hyphens as equivalent so the
+    two forms compare equal.
+    """
+    return " ".join(name.lower().replace("-", " ").split())
+
+
+def _udev_touchpad_names() -> set[str]:
+    """Return normalized names of the devices udev marks as touchpads."""
+    names: set[str] = set()
+    try:
+        entries = Path("/proc/bus/input/devices").read_text(errors="ignore").split("\n\n")
+    except OSError:
+        return names
+
+    for entry in entries:
+        name = ""
+        handlers: list[str] = []
+        for line in entry.splitlines():
+            if line.startswith("N: Name="):
+                name = line.removeprefix("N: Name=").strip().strip('"')
+            elif line.startswith("H: Handlers="):
+                handlers = line.removeprefix("H: Handlers=").split()
+        if not name or not handlers:
+            continue
+
+        for handler in handlers:
+            if not handler.startswith("event"):
+                continue
+            try:
+                dev = Path(f"/sys/class/input/{handler}/dev").read_text().strip()
+                data = Path(f"/run/udev/data/c{dev}").read_text(errors="ignore")
+            except OSError:
+                continue
+            if "ID_INPUT_TOUCHPAD=1" in data:
+                names.add(_normalize_device_name(name))
+                break
+    return names
+
+
 # Type exemplar values for IPC extraction — tells extract_ipc_value which
 # typed field to read.  e.g. 0 means "extract as int", 0.0 means "as float".
 _TYPE_HINTS: dict[str, Any] = {
@@ -606,9 +651,16 @@ class HyprlandState:
 
     def has_touchpad(self) -> bool:
         """Check if any touchpad or trackpad device is connected."""
+        udev_names: set[str] | None = None
         for m in self.get_devices().get("mice", []):
-            name = m.get("name", "").lower()
+            name = _normalize_device_name(m.get("name", ""))
             if "touchpad" in name or "trackpad" in name:
+                return True
+            # I2C/SMBus touchpads expose a hardware ID (``pnp0c50:...``) instead
+            # of a descriptive name, so fall back to udev's ID_INPUT_TOUCHPAD.
+            if udev_names is None:
+                udev_names = _udev_touchpad_names()
+            if name in udev_names:
                 return True
         return False
 
