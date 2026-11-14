@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `has_touchpad()` now finds touchpads that Hyprland lists under a hardware ID. Built-in I2C/SMBus touchpads can be named by their ID alone (`pnp0c50:0b-0911:5288`), with no "touchpad" or "trackpad" in the name for the old check to find, so hyprmod greyed out the touchpad settings and hid the Gestures page on laptops where the touchpad worked. `hyprctl devices` carries no touchpad flag, so when no name settles it the check falls back to udev's `ID_INPUT_TOUCHPAD` for the devices Hyprland reports. A touchpad Hyprland does not manage still does not make a plain mouse count as one. https://github.com/BlueManCZ/hyprland-state/pull/5
 - The udev fallback also matches a touchpad Hyprland renamed with a `-N` suffix because another device already held its name (`pnp0c50:0b-0911:5288-1`).
+- `apply()` and `apply_batch()` no longer fail in Lua mode for options with a dash in their name (`input:touchpad:tap-to-click`, `input:touchpad:tap-and-drag`). They were sent to `hl.config` under the dashed key, which Hyprland rejects with `unknown config key`; the fix lands in hyprland-config 0.9.21, and the floor now enforces it. https://github.com/BlueManCZ/hyprmod/issues/102
+- `monitors.apply()` now clears a mirror when `mirror_of` is reset. Hyprland's additive Lua monitor rules kept the previous target, so switching a display from Mirror back to Extend had no effect until the next config reload. Requires hyprland-monitors 0.9.1, and the floor now enforces it.
+
+### Changed
+
+- `save()` raises `hyprland_config.LuaReaderError` when the Lua config was only partly read, where it used to write the truncated document back over the file. This comes with hyprland-config 0.9.21: an error at the top level of a config stops the read, and saving what was read would drop the rest from disk. The file is left untouched and the pending changes stay pending. `document.read_warnings` lists the errors.
 
 ## [0.4.7] - 2026-08-27
 

@@ -16,8 +16,8 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    "hyprland-config>=0.9.14",
-    "hyprland-monitors>=0.9.0",
+    "hyprland-config>=0.9.21",
+    "hyprland-monitors>=0.9.1",
     "hyprland-schema>=0.7.1",
     "hyprland-socket>=0.12.1",
 ]
