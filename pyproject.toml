@@ -12,6 +12,7 @@ classifiers = [
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Desktop Environment",
     "Typing :: Typed",
 ]
@@ -19,7 +20,7 @@ dependencies = [
     "hyprland-config>=0.9.21",
     "hyprland-monitors>=0.9.2",
     "hyprland-schema>=0.7.1",
-    "hyprland-socket>=0.12.1",
+    "hyprland-socket>=0.12.2",
 ]
 
 [project.urls]

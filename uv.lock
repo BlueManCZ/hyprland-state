@@ -76,7 +76,7 @@ requires-dist = [
     { name = "hyprland-config", specifier = ">=0.9.21" },
     { name = "hyprland-monitors", specifier = ">=0.9.2" },
     { name = "hyprland-schema", specifier = ">=0.7.1" },
-    { name = "hyprland-socket", specifier = ">=0.12.1" },
+    { name = "hyprland-socket", specifier = ">=0.12.2" },
 ]
 
 [package.metadata.requires-dev]
