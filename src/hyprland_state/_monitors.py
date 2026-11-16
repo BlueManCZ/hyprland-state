@@ -37,7 +37,7 @@ class Monitors:
         Returns a list of ``MonitorState`` objects converted from IPC data.
         """
         raw = self._state._ipc_get(hyprland_socket.get_monitors, default=[])
-        return [MonitorState.from_ipc(m) for m in raw]
+        return [MonitorState.from_ipc(m, raw) for m in raw]
 
     def get(self, name: str) -> MonitorState | None:
         """Read a single monitor by name (no cache)."""

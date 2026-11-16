@@ -50,6 +50,19 @@ class TestGetAll:
         assert result[0].name == "DP-1"
 
     @patch("hyprland_state._monitors.hyprland_socket")
+    def test_mirror_target_id_resolved_to_name(self, mock_socket, mock_state):
+        # Hyprland reports mirrorOf as the target's monitor ID.
+        mock_socket.HyprlandError = hyprland_socket.HyprlandError
+        target = _make_ipc_monitor("DP-2")
+        mirror = _make_ipc_monitor("DP-3")
+        mirror.id = 1
+        mirror.mirror_of = "0"
+        mock_socket.get_monitors.return_value = [target, mirror]
+
+        result = Monitors(mock_state).get_all()
+        assert [m.mirror_of for m in result] == [None, "DP-2"]
+
+    @patch("hyprland_state._monitors.hyprland_socket")
     def test_ipc_error_returns_empty(self, mock_socket, mock_state):
         mock_socket.HyprlandError = hyprland_socket.HyprlandError
         mock_socket.get_monitors.side_effect = hyprland_socket.HyprlandError("socket error")
